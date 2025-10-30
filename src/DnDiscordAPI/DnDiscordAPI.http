@@ -1,0 +1,6 @@
+@DnDiscordAPI_HostAddress = http://localhost:5261
+
+GET {{DnDiscordAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
