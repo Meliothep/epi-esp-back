@@ -353,6 +353,36 @@ public class CampaignSnapshotController : ControllerBase
     }
     
     /// <summary>
+    /// Recalculates the hash for a snapshot based on the PostgreSQL-normalized JSON.
+    /// Use this to repair snapshots that have invalid hashes due to jsonb normalization.
+    /// </summary>
+    /// <param name="campaignId">The campaign ID.</param>
+    /// <param name="id">The snapshot ID to repair.</param>
+    /// <returns>No content on success.</returns>
+    [HttpPost("{id:guid}/recalculate-hash")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RecalculateHash(
+        [FromRoute] Guid campaignId,
+        [FromRoute] Guid id,
+        CancellationToken cancellationToken)
+    {
+        var success = await _snapshotService.RecalculateHashAsync(campaignId, id, cancellationToken);
+        
+        if (!success)
+        {
+            return NotFound(new ProblemDetails
+            {
+                Title = "Snapshot Not Found",
+                Detail = $"Snapshot {id} not found for campaign {campaignId}",
+                Status = StatusCodes.Status404NotFound
+            });
+        }
+        
+        return NoContent();
+    }
+    
+    /// <summary>
     /// Gets the current user ID from the authentication context.
     /// </summary>
     private Guid GetCurrentUserId()
