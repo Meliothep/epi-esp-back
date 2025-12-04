@@ -9,12 +9,19 @@ namespace DnDiscordAPI.Games.Character.Mappings
         public CharacterMappingProfile()
         {
             // Character mappings
-            CreateMap<Models.Character, CharacterDto>();
+            CreateMap<Models.Character, CharacterDto>()
+                .ForMember(dest => dest.RaceTraits, opt => opt.MapFrom(src => src.GetRaceTraits()))
+                .ForMember(dest => dest.ClassTraits, opt => opt.MapFrom(src => src.GetClassTraits()));
+            
             CreateMap<CharacterDto, Models.Character>();
 
             // AbilityScores mappings
             CreateMap<AbilityScores, AbilityScoresDto>();
             CreateMap<AbilityScoresDto, AbilityScores>();
+
+            // Traits mappings
+            CreateMap<RaceTraits, RaceTraitsDto>();
+            CreateMap<ClassTraits, ClassTraitsDto>();
         }
     }
 }

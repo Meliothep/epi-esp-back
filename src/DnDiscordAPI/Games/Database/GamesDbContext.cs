@@ -31,11 +31,11 @@ namespace DnDiscordAPI.Games.Database
 
                 entity.Property(e => e.Class)
                     .IsRequired()
-                    .HasMaxLength(50);
+                    .HasConversion<string>();
 
                 entity.Property(e => e.Race)
                     .IsRequired()
-                    .HasMaxLength(50);
+                    .HasConversion<string>();
 
                 // Configuration pour les AbilityScores (owned entity)
                 entity.OwnsOne(e => e.Abilities, abilities =>

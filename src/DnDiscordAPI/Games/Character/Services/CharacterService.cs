@@ -34,6 +34,16 @@ namespace DnDiscordAPI.Games.Character.Services
 
         public async Task<CharacterDto> CreateCharacterAsync(string discordUserId, CreateCharacterRequest request)
         {
+            // Obtenir les traits de race et de classe
+            var raceTraits = RaceTraits.GetTraits(request.Race);
+            var classTraits = ClassTraits.GetTraits(request.Class);
+
+            // Créer les scores d'aptitude de base
+            var baseAbilities = _mapper.Map<AbilityScores>(request.Abilities ?? new AbilityScoresDto());
+            
+            // Appliquer les modificateurs raciaux
+            var finalAbilities = raceTraits.ApplyModifiers(baseAbilities);
+
             var character = new Models.Character
             {
                 Id = Guid.NewGuid(),
@@ -42,22 +52,25 @@ namespace DnDiscordAPI.Games.Character.Services
                 Class = request.Class,
                 Race = request.Race,
                 Level = 1,
-                Abilities = _mapper.Map<AbilityScores>(request.Abilities),
+                Abilities = finalAbilities,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
 
-            // Calculs initiaux
-            character.MaxHitPoints = CalculateInitialHitPoints(character.Class, character.Abilities.GetModifier(character.Abilities.Constitution));
+            // Calculs initiaux basés sur les traits
+            var constitutionModifier = character.Abilities.GetModifier(character.Abilities.Constitution);
+            character.MaxHitPoints = classTraits.CalculateMaxHitPoints(1, constitutionModifier);
             character.CurrentHitPoints = character.MaxHitPoints;
             character.ArmorClass = 10 + character.Abilities.GetModifier(character.Abilities.Dexterity);
-            character.Speed = GetRaceSpeed(character.Race);
+            character.Speed = raceTraits.BaseSpeed;
             character.Initiative = character.Abilities.GetModifier(character.Abilities.Dexterity);
 
             _context.Characters.Add(character);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Character {Name} created for user {UserId}", character.Name, discordUserId);
+            _logger.LogInformation(
+                "Character {Name} ({Race} {Class}) created for user {UserId}",
+                character.Name, character.Race, character.Class, discordUserId);
 
             return _mapper.Map<CharacterDto>(character);
         }
@@ -99,29 +112,6 @@ namespace DnDiscordAPI.Games.Character.Services
 
 
 
-        private int CalculateInitialHitPoints(string characterClass, int constitutionModifier)
-        {
-            var baseHp = characterClass.ToLower() switch
-            {
-                "barbarian" => 12,
-                "fighter" or "paladin" or "ranger" => 10,
-                "bard" or "cleric" or "druid" or "monk" or "rogue" or "warlock" => 8,
-                "sorcerer" or "wizard" => 6,
-                _ => 8
-            };
-
-            return baseHp + constitutionModifier;
-        }
-
-        private int GetRaceSpeed(string race)
-        {
-            return race.ToLower() switch
-            {
-                "dwarf" or "halfling" or "gnome" => 25,
-                "wood elf" => 35,
-                _ => 30
-            };
-        }
 
         public async Task<CharacterDto> LevelUpAsync(Guid characterId)
         {
@@ -132,41 +122,32 @@ namespace DnDiscordAPI.Games.Character.Services
             // Augmenter le niveau
             character.Level++;
 
-            // Calculer l'augmentation des HP
-            var hpIncrease = RollHitDie(character.Class) + character.Abilities.GetModifier(character.Abilities.Constitution);
-            character.MaxHitPoints += hpIncrease;
+            // Obtenir les traits de classe pour le calcul des HP
+            var classTraits = character.GetClassTraits();
+            var constitutionModifier = character.Abilities.GetModifier(character.Abilities.Constitution);
+            
+            // Recalculer les HP maximaux pour le nouveau niveau
+            var newMaxHp = classTraits.CalculateMaxHitPoints(character.Level, constitutionModifier);
+            var hpIncrease = newMaxHp - character.MaxHitPoints;
+            
+            character.MaxHitPoints = newMaxHp;
             character.CurrentHitPoints += hpIncrease; // On augmente aussi les HP actuels
-
-            var newProficiencyBonus = 2 + ((character.Level - 1) / 4);
 
             character.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
 
             _logger.LogInformation(
-                "Character {Name} (ID: {Id}) leveled up to level {Level}. HP: {Current}/{Max}",
+                "Character {Name} (ID: {Id}) leveled up to level {Level}. HP increased by {Increase} ({Current}/{Max})",
                 character.Name,
                 character.Id,
                 character.Level,
+                hpIncrease,
                 character.CurrentHitPoints,
                 character.MaxHitPoints
             );
 
             return _mapper.Map<CharacterDto>(character);
-        }
-
-        private int RollHitDie(string characterClass)
-        {
-            var dieSize = characterClass.ToLower() switch
-            {
-                "barbarian" => 12,
-                "fighter" or "paladin" or "ranger" => 10,
-                "bard" or "cleric" or "druid" or "monk" or "rogue" or "warlock" => 8,
-                "sorcerer" or "wizard" => 6,
-                _ => 8
-            };
-
-            return Random.Shared.Next(1, dieSize + 1);
         }
     }
 }
