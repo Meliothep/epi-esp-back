@@ -1,0 +1,153 @@
+﻿using AutoMapper;
+using DnDiscordAPI.Games.Character.DTOs;
+using DnDiscordAPI.Games.Character.Models;
+using DnDiscordAPI.Games.Database;
+using Microsoft.EntityFrameworkCore;
+
+namespace DnDiscordAPI.Games.Character.Services
+{
+    public interface ICharacterService
+    {
+        Task<CharacterDto> CreateCharacterAsync(string discordUserId, CreateCharacterRequest request);
+        Task<CharacterDto> GetCharacterAsync(Guid characterId);
+        Task<List<CharacterDto>> GetUserCharactersAsync(string discordUserId);
+        Task<CharacterDto> UpdateHitPointsAsync(Guid characterId, int newHitPoints);
+        Task<CharacterDto> LevelUpAsync(Guid characterId);
+    }
+
+
+    public class CharacterService : ICharacterService
+    {
+        private readonly GamesDbContext _context; // Manque la classe GamesDbContext
+        private readonly IMapper _mapper; // Manque la référence à AutoMapper
+        private readonly ILogger<CharacterService> _logger;
+
+        public CharacterService(
+            GamesDbContext context, 
+            IMapper mapper,
+            ILogger<CharacterService> logger)
+        {
+            _context = context;
+            _mapper = mapper;
+            _logger = logger;
+        }
+
+        public async Task<CharacterDto> CreateCharacterAsync(string discordUserId, CreateCharacterRequest request)
+        {
+            // Obtenir les traits de race et de classe
+            var raceTraits = RaceTraits.GetTraits(request.Race);
+            var classTraits = ClassTraits.GetTraits(request.Class);
+
+            // Créer les scores d'aptitude de base
+            var baseAbilities = _mapper.Map<AbilityScores>(request.Abilities ?? new AbilityScoresDto());
+            
+            // Appliquer les modificateurs raciaux
+            var finalAbilities = raceTraits.ApplyModifiers(baseAbilities);
+
+            var character = new Models.Character
+            {
+                Id = Guid.NewGuid(),
+                DiscordUserId = discordUserId,
+                Name = request.Name,
+                Class = request.Class,
+                Race = request.Race,
+                Level = 1,
+                Abilities = finalAbilities,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            // Calculs initiaux basés sur les traits
+            var constitutionModifier = character.Abilities.GetModifier(character.Abilities.Constitution);
+            character.MaxHitPoints = classTraits.CalculateMaxHitPoints(1, constitutionModifier);
+            character.CurrentHitPoints = character.MaxHitPoints;
+            character.ArmorClass = 10 + character.Abilities.GetModifier(character.Abilities.Dexterity);
+            character.Speed = raceTraits.BaseSpeed;
+            character.Initiative = character.Abilities.GetModifier(character.Abilities.Dexterity);
+
+            _context.Characters.Add(character);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Character {Name} ({Race} {Class}) created for user {UserId}",
+                character.Name, character.Race, character.Class, discordUserId);
+
+            return _mapper.Map<CharacterDto>(character);
+        }
+
+        public async Task<List<CharacterDto>> GetUserCharactersAsync(string discordUserId)
+        {
+            var characters = await _context.Characters
+                .Where(c => c.DiscordUserId == discordUserId)
+                .OrderBy(c => c.Name)
+                .ToListAsync();
+
+            return _mapper.Map<List<CharacterDto>>(characters);
+        }
+
+        public async Task<CharacterDto> GetCharacterAsync(Guid characterId)
+        {
+            var character = await _context.Characters
+                .FirstOrDefaultAsync(c => c.Id == characterId);
+
+            if (character == null)
+                throw new Exception($"Character {characterId} not found");
+
+            return _mapper.Map<CharacterDto>(character);
+        }
+
+        public async Task<CharacterDto> UpdateHitPointsAsync(Guid characterId, int newHitPoints)
+        {
+            var character = await _context.Characters.FindAsync(characterId);
+            if (character == null)
+                throw new Exception($"Character {characterId} not found");
+
+            character.CurrentHitPoints = Math.Clamp(newHitPoints, 0, character.MaxHitPoints);
+            character.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            return _mapper.Map<CharacterDto>(character);
+        }
+
+
+
+
+        public async Task<CharacterDto> LevelUpAsync(Guid characterId)
+        {
+            var character = await _context.Characters.FindAsync(characterId);
+            if (character == null)
+                throw new Exception($"Character {characterId} not found");
+
+            // Augmenter le niveau
+            character.Level++;
+
+            // Obtenir les traits de classe pour le calcul des HP
+            var classTraits = character.GetClassTraits();
+            var constitutionModifier = character.Abilities.GetModifier(character.Abilities.Constitution);
+            
+            // Recalculer les HP maximaux pour le nouveau niveau
+            var newMaxHp = classTraits.CalculateMaxHitPoints(character.Level, constitutionModifier);
+            var hpIncrease = newMaxHp - character.MaxHitPoints;
+            
+            character.MaxHitPoints = newMaxHp;
+            character.CurrentHitPoints += hpIncrease; // On augmente aussi les HP actuels
+
+            character.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Character {Name} (ID: {Id}) leveled up to level {Level}. HP increased by {Increase} ({Current}/{Max})",
+                character.Name,
+                character.Id,
+                character.Level,
+                hpIncrease,
+                character.CurrentHitPoints,
+                character.MaxHitPoints
+            );
+
+            return _mapper.Map<CharacterDto>(character);
+        }
+    }
+}
