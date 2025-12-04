@@ -22,12 +22,18 @@ public class CampaignDbContext : DbContext
     /// </summary>
     public DbSet<CampaignSnapshot> CampaignSnapshots => Set<CampaignSnapshot>();
 
+    /// <summary>
+    /// Campaign members table.
+    /// </summary>
+    public DbSet<CampaignMember> CampaignMembers => Set<CampaignMember>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
         ConfigureCampaign(modelBuilder);
         ConfigureCampaignSnapshot(modelBuilder);
+        ConfigureCampaignMember(modelBuilder);
     }
 
     private static void ConfigureCampaign(ModelBuilder modelBuilder)
@@ -58,9 +64,25 @@ public class CampaignDbContext : DbContext
             entity.Property(c => c.SettingsJson)
                 .HasColumnType("jsonb");
 
+            entity.Property(c => c.ImageUrl)
+                .HasMaxLength(2000);
+
+            entity.Property(c => c.MaxPlayers)
+                .HasDefaultValue(6);
+
+            entity.Property(c => c.InviteCode)
+                .HasMaxLength(20);
+
+            // Query filter for soft delete
+            entity.HasQueryFilter(c => !c.IsDeleted);
+
+            // Indexes
             entity.HasIndex(c => c.DungeonMasterId);
             entity.HasIndex(c => c.Status);
             entity.HasIndex(c => c.CreatedAt);
+            entity.HasIndex(c => c.IsPublic);
+            entity.HasIndex(c => c.InviteCode).IsUnique();
+            entity.HasIndex(c => c.IsDeleted);
         });
     }
 
@@ -97,25 +119,66 @@ public class CampaignDbContext : DbContext
 
             entity.Property(s => s.DataHash)
                 .IsRequired()
-                .HasMaxLength(64); // SHA-256 hex string
+                .HasMaxLength(64);
 
-            // Store snapshot data as JSONB for better PostgreSQL performance
             entity.Property(s => s.DataJson)
                 .IsRequired()
                 .HasColumnType("jsonb");
 
-            // Relationship: Campaign 1-N Snapshots
             entity.HasOne(s => s.Campaign)
                 .WithMany(c => c.Snapshots)
                 .HasForeignKey(s => s.CampaignId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Indexes for common queries
             entity.HasIndex(s => s.CampaignId);
             entity.HasIndex(s => s.CreatedAt);
             entity.HasIndex(s => s.Status);
             entity.HasIndex(s => new { s.CampaignId, s.Version }).IsUnique();
         });
     }
-}
 
+    private static void ConfigureCampaignMember(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<CampaignMember>(entity =>
+        {
+            entity.ToTable("CampaignMembers");
+            
+            entity.HasKey(m => m.Id);
+            
+            entity.Property(m => m.Id)
+                .ValueGeneratedOnAdd();
+
+            entity.Property(m => m.CampaignId)
+                .IsRequired();
+
+            entity.Property(m => m.UserId)
+                .IsRequired();
+
+            entity.Property(m => m.Role)
+                .HasConversion<string>()
+                .HasMaxLength(20);
+
+            entity.Property(m => m.Status)
+                .HasConversion<string>()
+                .HasMaxLength(20);
+
+            entity.Property(m => m.Nickname)
+                .HasMaxLength(100);
+
+            entity.Property(m => m.Notes)
+                .HasMaxLength(2000);
+
+            // Relationship: Campaign 1-N Members
+            entity.HasOne(m => m.Campaign)
+                .WithMany(c => c.Members)
+                .HasForeignKey(m => m.CampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes
+            entity.HasIndex(m => m.CampaignId);
+            entity.HasIndex(m => m.UserId);
+            entity.HasIndex(m => m.Status);
+            entity.HasIndex(m => new { m.CampaignId, m.UserId }).IsUnique();
+        });
+    }
+}
