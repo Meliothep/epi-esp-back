@@ -60,6 +60,12 @@ public interface ISnapshotService
     /// Archives a snapshot (hides from default list but keeps data).
     /// </summary>
     Task<bool> ArchiveSnapshotAsync(Guid campaignId, Guid snapshotId, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Recalculates the hash for a snapshot based on the normalized JSON stored in PostgreSQL.
+    /// Use this to repair snapshots with invalid hashes due to jsonb normalization.
+    /// </summary>
+    Task<bool> RecalculateHashAsync(Guid campaignId, Guid snapshotId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -104,15 +110,15 @@ public class SnapshotService : ISnapshotService
         // Build snapshot data
         var snapshotData = await BuildSnapshotDataAsync(campaign, cancellationToken);
         
-        // Serialize and compute hash
+        // Serialize (hash will be computed after DB normalization)
         var json = _serializer.Serialize(snapshotData);
-        var hash = _serializer.ComputeHash(json);
         var sizeBytes = _serializer.GetSizeBytes(json);
         
-        // Create snapshot entity
+        // Create snapshot entity with temporary hash
+        var snapshotId = Guid.NewGuid();
         var snapshot = new CampaignSnapshot
         {
-            Id = Guid.NewGuid(),
+            Id = snapshotId,
             CampaignId = campaignId,
             Version = nextVersion,
             Label = request.Label,
@@ -121,14 +127,27 @@ public class SnapshotService : ISnapshotService
             CreatedAt = DateTime.UtcNow,
             Status = SnapshotStatus.Active,
             DataJson = json,
-            DataHash = hash,
+            DataHash = "pending", // Temporary, will be updated after DB normalization
             SizeBytes = sizeBytes
         };
         
         _dbContext.CampaignSnapshots.Add(snapshot);
         await _dbContext.SaveChangesAsync(cancellationToken);
         
-        _logger.LogInformation("Created snapshot {SnapshotId} version {Version} for campaign {CampaignId}", 
+        // Reload the entity to get PostgreSQL-normalized JSON (jsonb normalizes key order, whitespace)
+        // This ensures the hash matches what's actually stored in the database
+        await _dbContext.Entry(snapshot).ReloadAsync(cancellationToken);
+        
+        // Compute hash on the normalized JSON from PostgreSQL
+        var normalizedHash = _serializer.ComputeHash(snapshot.DataJson);
+        var normalizedSize = _serializer.GetSizeBytes(snapshot.DataJson);
+        
+        // Update the hash with the correct value
+        snapshot.DataHash = normalizedHash;
+        snapshot.SizeBytes = normalizedSize;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        
+        _logger.LogInformation("Created snapshot {SnapshotId} version {Version} for campaign {CampaignId} (hash computed from normalized JSON)", 
             snapshot.Id, nextVersion, campaignId);
         
         return MapToResponse(snapshot, snapshotData);
@@ -230,7 +249,7 @@ public class SnapshotService : ISnapshotService
         
         var warnings = new List<string>();
         
-        // Get the snapshot
+        // Get the snapshot (outside transaction)
         var snapshot = await _dbContext.CampaignSnapshots
             .FirstOrDefaultAsync(s => s.Id == snapshotId && s.CampaignId == campaignId, cancellationToken)
             ?? throw new SnapshotException($"Snapshot {snapshotId} not found");
@@ -260,66 +279,106 @@ public class SnapshotService : ISnapshotService
         
         Guid? backupSnapshotId = null;
         
-        // Use a transaction for atomicity
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        // Use execution strategy pattern for compatibility with retry strategies
+        var strategy = _dbContext.Database.CreateExecutionStrategy();
         
-        try
+        await strategy.ExecuteAsync(async () =>
         {
-            // Create backup if requested
-            if (request.CreateBackupBeforeRestore)
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+            
+            try
             {
-                var backupLabel = request.BackupLabel ?? $"Auto-backup before restore from v{snapshot.Version}";
-                var backupRequest = new CreateSnapshotRequest
+                // Create backup if requested
+                if (request.CreateBackupBeforeRestore)
                 {
-                    Label = backupLabel,
-                    Description = $"Automatic backup created before restoring from snapshot '{snapshot.Label}' (v{snapshot.Version})"
-                };
+                    var backupLabel = request.BackupLabel ?? $"Auto-backup before restore from v{snapshot.Version}";
+                    var backupRequest = new CreateSnapshotRequest
+                    {
+                        Label = backupLabel,
+                        Description = $"Automatic backup created before restoring from snapshot '{snapshot.Label}' (v{snapshot.Version})"
+                    };
+                    
+                    var backup = await CreateSnapshotInternalAsync(campaignId, backupRequest, userId, cancellationToken);
+                    backupSnapshotId = backup.Id;
+                    
+                    _logger.LogInformation("Created backup snapshot {BackupId} before restore", backupSnapshotId);
+                }
                 
-                var backup = await CreateSnapshotAsync(campaignId, backupRequest, userId, cancellationToken);
-                backupSnapshotId = backup.Id;
+                // Restore campaign data
+                var campaign = await _dbContext.Campaigns
+                    .FirstOrDefaultAsync(c => c.Id == campaignId, cancellationToken)
+                    ?? throw new SnapshotException($"Campaign {campaignId} not found");
                 
-                _logger.LogInformation("Created backup snapshot {BackupId} before restore", backupSnapshotId);
+                // Update campaign properties from snapshot
+                campaign.Name = snapshotData.Campaign.Name;
+                campaign.Description = snapshotData.Campaign.Description;
+                campaign.Status = snapshotData.Campaign.Status;
+                campaign.LastPlayedAt = snapshotData.Campaign.LastPlayedAt;
+                campaign.UpdatedAt = DateTime.UtcNow;
+                
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                
+                _logger.LogInformation("Successfully restored campaign {CampaignId} from snapshot {SnapshotId}", 
+                    campaignId, snapshotId);
             }
-            
-            // Restore campaign data
-            var campaign = await _dbContext.Campaigns
-                .FirstOrDefaultAsync(c => c.Id == campaignId, cancellationToken)
-                ?? throw new SnapshotException($"Campaign {campaignId} not found");
-            
-            // Update campaign properties from snapshot
-            campaign.Name = snapshotData.Campaign.Name;
-            campaign.Description = snapshotData.Campaign.Description;
-            campaign.Status = snapshotData.Campaign.Status;
-            campaign.LastPlayedAt = snapshotData.Campaign.LastPlayedAt;
-            campaign.UpdatedAt = DateTime.UtcNow;
-            
-            // Note: Full restoration of characters, sessions, and scene state
-            // would require access to those respective DbContexts/services.
-            // This is a placeholder for the campaign-level restoration.
-            // In a real implementation, you would inject and call the 
-            // Character, GameSession, and SceneState services here.
-            
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            
-            _logger.LogInformation("Successfully restored campaign {CampaignId} from snapshot {SnapshotId}", 
-                campaignId, snapshotId);
-            
-            return new RestoreSnapshotResponse
+            catch (Exception ex)
             {
-                Success = true,
-                Message = $"Campaign successfully restored from snapshot v{snapshot.Version}",
-                BackupSnapshotId = backupSnapshotId,
-                Warnings = warnings
-            };
-        }
-        catch (Exception ex)
+                await transaction.RollbackAsync(cancellationToken);
+                _logger.LogError(ex, "Failed to restore campaign {CampaignId} from snapshot {SnapshotId}", 
+                    campaignId, snapshotId);
+                throw;
+            }
+        });
+        
+        return new RestoreSnapshotResponse
         {
-            await transaction.RollbackAsync(cancellationToken);
-            _logger.LogError(ex, "Failed to restore campaign {CampaignId} from snapshot {SnapshotId}", 
-                campaignId, snapshotId);
-            throw;
-        }
+            Success = true,
+            Message = $"Campaign successfully restored from snapshot v{snapshot.Version}",
+            BackupSnapshotId = backupSnapshotId,
+            Warnings = warnings
+        };
+    }
+    
+    /// <summary>
+    /// Internal version of CreateSnapshotAsync that doesn't reload from DB (for use within transactions).
+    /// </summary>
+    private async Task<SnapshotResponse> CreateSnapshotInternalAsync(
+        Guid campaignId, 
+        CreateSnapshotRequest request, 
+        Guid userId, 
+        CancellationToken cancellationToken)
+    {
+        var campaign = await _dbContext.Campaigns
+            .FirstOrDefaultAsync(c => c.Id == campaignId, cancellationToken)
+            ?? throw new SnapshotException($"Campaign {campaignId} not found");
+        
+        var nextVersion = await GetNextVersionAsync(campaignId, cancellationToken);
+        var snapshotData = await BuildSnapshotDataAsync(campaign, cancellationToken);
+        var json = _serializer.Serialize(snapshotData);
+        var sizeBytes = _serializer.GetSizeBytes(json);
+        // Note: Hash is computed on original JSON, will be recalculated after commit
+        var hash = _serializer.ComputeHash(json);
+        
+        var snapshot = new CampaignSnapshot
+        {
+            Id = Guid.NewGuid(),
+            CampaignId = campaignId,
+            Version = nextVersion,
+            Label = request.Label,
+            Description = request.Description,
+            CreatedBy = userId,
+            CreatedAt = DateTime.UtcNow,
+            Status = SnapshotStatus.Active,
+            DataJson = json,
+            DataHash = hash,
+            SizeBytes = sizeBytes
+        };
+        
+        _dbContext.CampaignSnapshots.Add(snapshot);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        
+        return MapToResponse(snapshot, snapshotData);
     }
     
     /// <inheritdoc />
@@ -416,16 +475,16 @@ public class SnapshotService : ISnapshotService
         
         // Re-serialize with updated data
         var json = _serializer.Serialize(snapshotData);
-        var hash = _serializer.ComputeHash(json);
         var sizeBytes = _serializer.GetSizeBytes(json);
         
         // Get next version
         var nextVersion = await GetNextVersionAsync(campaignId, cancellationToken);
         
-        // Create snapshot entity
+        // Create snapshot entity with temporary hash
+        var snapshotId = Guid.NewGuid();
         var snapshot = new CampaignSnapshot
         {
-            Id = Guid.NewGuid(),
+            Id = snapshotId,
             CampaignId = campaignId,
             Version = nextVersion,
             Label = request.Label,
@@ -434,11 +493,23 @@ public class SnapshotService : ISnapshotService
             CreatedAt = DateTime.UtcNow,
             Status = SnapshotStatus.Active,
             DataJson = json,
-            DataHash = hash,
+            DataHash = "pending", // Temporary, will be updated after DB normalization
             SizeBytes = sizeBytes
         };
         
         _dbContext.CampaignSnapshots.Add(snapshot);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        
+        // Reload the entity to get PostgreSQL-normalized JSON
+        await _dbContext.Entry(snapshot).ReloadAsync(cancellationToken);
+        
+        // Compute hash on the normalized JSON from PostgreSQL
+        var normalizedHash = _serializer.ComputeHash(snapshot.DataJson);
+        var normalizedSize = _serializer.GetSizeBytes(snapshot.DataJson);
+        
+        // Update the hash with the correct value
+        snapshot.DataHash = normalizedHash;
+        snapshot.SizeBytes = normalizedSize;
         await _dbContext.SaveChangesAsync(cancellationToken);
         
         _logger.LogInformation("Imported snapshot {SnapshotId} version {Version} for campaign {CampaignId}", 
@@ -568,6 +639,44 @@ public class SnapshotService : ISnapshotService
         await _dbContext.SaveChangesAsync(cancellationToken);
         
         _logger.LogInformation("Archived snapshot {SnapshotId} from campaign {CampaignId}", snapshotId, campaignId);
+        
+        return true;
+    }
+    
+    /// <inheritdoc />
+    public async Task<bool> RecalculateHashAsync(
+        Guid campaignId, 
+        Guid snapshotId, 
+        CancellationToken cancellationToken = default)
+    {
+        var snapshot = await _dbContext.CampaignSnapshots
+            .FirstOrDefaultAsync(s => s.Id == snapshotId && s.CampaignId == campaignId, cancellationToken);
+        
+        if (snapshot == null) return false;
+        
+        // Calculate hash based on the current (PostgreSQL-normalized) JSON
+        var newHash = _serializer.ComputeHash(snapshot.DataJson);
+        var oldHash = snapshot.DataHash;
+        
+        if (oldHash == newHash)
+        {
+            _logger.LogInformation("Snapshot {SnapshotId} hash is already correct", snapshotId);
+            return true;
+        }
+        
+        snapshot.DataHash = newHash;
+        snapshot.SizeBytes = _serializer.GetSizeBytes(snapshot.DataJson);
+        
+        // If snapshot was marked as corrupted, restore to active
+        if (snapshot.Status == SnapshotStatus.Corrupted)
+        {
+            snapshot.Status = SnapshotStatus.Active;
+        }
+        
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        
+        _logger.LogInformation("Recalculated hash for snapshot {SnapshotId}: {OldHash} -> {NewHash}", 
+            snapshotId, oldHash, newHash);
         
         return true;
     }

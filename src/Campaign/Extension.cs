@@ -1,3 +1,4 @@
+using DnDiscord.Campaign.BL.Campaigns;
 using DnDiscord.Campaign.BL.Snapshots;
 using DnDiscord.Campaign.DataAccess;
 using Microsoft.AspNetCore.Builder;
@@ -22,6 +23,9 @@ public static class CampaignExtensions
     {
         // Register DbContext
         builder.AddCampaignDbContext();
+        
+        // Register Campaign services
+        builder.AddCampaignServices();
         
         // Register Snapshot services
         builder.AddSnapshotServices();
@@ -54,6 +58,20 @@ public static class CampaignExtensions
                 options.EnableSensitiveDataLogging();
             }
         });
+        
+        return builder;
+    }
+    
+    /// <summary>
+    /// Adds Campaign-related services.
+    /// </summary>
+    private static IHostApplicationBuilder AddCampaignServices(this IHostApplicationBuilder builder)
+    {
+        // Singleton services (stateless validators)
+        builder.Services.AddSingleton<ICampaignValidator, CampaignValidator>();
+        
+        // Scoped services (per-request with DbContext dependency)
+        builder.Services.AddScoped<ICampaignService, CampaignService>();
         
         return builder;
     }
