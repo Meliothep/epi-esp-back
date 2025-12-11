@@ -33,7 +33,8 @@ namespace DnDiscordAPI.Games.Database.Migrations
 
                     b.Property<string>("Class")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -62,7 +63,8 @@ namespace DnDiscordAPI.Games.Database.Migrations
 
                     b.Property<string>("Race")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<int>("Speed")
                         .HasColumnType("integer");

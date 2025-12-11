@@ -15,8 +15,7 @@ namespace DnDiscordAPI.Games.Character.DTOs
         
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public CharacterRace Race { get; set; }
-        
-        public int CurrentHitPoints { get; set; }
+                public int CurrentHitPoints { get; set; }
         public int MaxHitPoints { get; set; }
         public int ArmorClass { get; set; }
         public int Initiative { get; set; }

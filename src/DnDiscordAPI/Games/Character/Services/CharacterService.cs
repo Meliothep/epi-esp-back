@@ -18,8 +18,8 @@ namespace DnDiscordAPI.Games.Character.Services
 
     public class CharacterService : ICharacterService
     {
-        private readonly GamesDbContext _context; // Manque la classe GamesDbContext
-        private readonly IMapper _mapper; // Manque la référence à AutoMapper
+        private readonly GamesDbContext _context; 
+        private readonly IMapper _mapper; 
         private readonly ILogger<CharacterService> _logger;
 
         public CharacterService(
@@ -52,7 +52,7 @@ namespace DnDiscordAPI.Games.Character.Services
                 Class = request.Class,
                 Race = request.Race,
                 Level = 1,
-                Abilities = finalAbilities,
+                Abilities = _mapper.Map<AbilityScores>(request.Abilities),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -68,9 +68,7 @@ namespace DnDiscordAPI.Games.Character.Services
             _context.Characters.Add(character);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation(
-                "Character {Name} ({Race} {Class}) created for user {UserId}",
-                character.Name, character.Race, character.Class, discordUserId);
+            _logger.LogInformation("Character {Name} created for user {UserId}", character.Name, discordUserId);
 
             return _mapper.Map<CharacterDto>(character);
         }
@@ -110,8 +108,29 @@ namespace DnDiscordAPI.Games.Character.Services
             return _mapper.Map<CharacterDto>(character);
         }
 
+        private int CalculateInitialHitPoints(string characterClass, int constitutionModifier)
+        {
+            var baseHp = characterClass.ToLower() switch
+            {
+                "barbarian" => 12,
+                "fighter" or "paladin" or "ranger" => 10,
+                "bard" or "cleric" or "druid" or "monk" or "rogue" or "warlock" => 8,
+                "sorcerer" or "wizard" => 6,
+                _ => 8
+            };
 
+            return baseHp + constitutionModifier;
+        }
 
+        private int GetRaceSpeed(string race)
+        {
+            return race.ToLower() switch
+            {
+                "dwarf" or "halfling" or "gnome" => 25,
+                "wood elf" => 35,
+                _ => 30
+            };
+        }
 
         public async Task<CharacterDto> LevelUpAsync(Guid characterId)
         {
@@ -132,22 +151,34 @@ namespace DnDiscordAPI.Games.Character.Services
             
             character.MaxHitPoints = newMaxHp;
             character.CurrentHitPoints += hpIncrease; // On augmente aussi les HP actuels
-
             character.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
 
             _logger.LogInformation(
-                "Character {Name} (ID: {Id}) leveled up to level {Level}. HP increased by {Increase} ({Current}/{Max})",
+                "Character {Name} (ID: {Id}) leveled up to level {Level}. HP: {Current}/{Max}",
                 character.Name,
                 character.Id,
                 character.Level,
-                hpIncrease,
                 character.CurrentHitPoints,
                 character.MaxHitPoints
             );
 
             return _mapper.Map<CharacterDto>(character);
+        }
+
+        private int RollHitDie(string characterClass)
+        {
+            var dieSize = characterClass.ToLower() switch
+            {
+                "barbarian" => 12,
+                "fighter" or "paladin" or "ranger" => 10,
+                "bard" or "cleric" or "druid" or "monk" or "rogue" or "warlock" => 8,
+                "sorcerer" or "wizard" => 6,
+                _ => 8
+            };
+
+            return Random.Shared.Next(1, dieSize + 1);
         }
     }
 }

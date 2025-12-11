@@ -1,7 +1,10 @@
+using System.Text;
 using DnDiscord.Campaign;
 using DnDiscordAPI.Games;
 using DnDiscordAPI.Games.Database;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,11 +12,43 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
-// Ajout des services Games (DbContext, AutoMapper, Services)
 builder.AddGamesServices();
 
+// Configuration Swagger/OpenAPI
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new() { Title = "DnDiscord API", Version = "v1" });
+});
+
+string? scalarURL = Environment.GetEnvironmentVariable("SCALAR_URLS");
+scalarURL = scalarURL != null ? scalarURL : "http://localhost:5054";
 builder.AddObservability();
 builder.AddApiDefaults();
+
+// Configuration Authentication/Authorization (JWT)
+var jwtSection = builder.Configuration.GetSection("Jwt");
+var jwtSecret = jwtSection["SecretKey"]
+    ?? throw new InvalidOperationException("Jwt:SecretKey must be configured");
+var jwtIssuer = jwtSection["Issuer"] ?? "dndiscord-backend";
+var jwtAudience = jwtSection["Audience"] ?? "dndiscord-frontend";
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
+            ValidateIssuer = true,
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAudience,
+            ValidateLifetime = true
+        };
+    });
+
+builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
@@ -35,13 +70,14 @@ using (var scope = app.Services.CreateScope())
 }
 
 // Configure modular middleware
+
 app.UseCampaignModule();
 app.MapDefaultEndpoints();
 app.UseHttpsRedirection();
 
-// Note: Authentication temporairement désactivée pour les tests
-// app.UseAuthentication();
-// app.UseAuthorization();
+// Auth pipeline
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 

@@ -7,7 +7,7 @@ namespace DnDiscordAPI.Games.Controllers
 {
     [ApiController]
     [Route("api/games/[controller]")]
-    // [Authorize] // Temporairement désactivé pour les tests
+    [Authorize] // JWT obligatoire
     public class CharacterController : ControllerBase
     {
         private readonly ICharacterService _characterService;
@@ -20,8 +20,11 @@ namespace DnDiscordAPI.Games.Controllers
         [HttpPost]
         public async Task<ActionResult<CharacterDto>> CreateCharacter([FromBody] CreateCharacterRequest request)
         {
-            // Pour les tests, on utilise un userId par défaut si pas authentifié
-            var discordUserId = User.FindFirst("discord_id")?.Value ?? "test-user-123";
+            var discordUserId = User.FindFirst("sub")?.Value
+                ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (string.IsNullOrEmpty(discordUserId))
+                return Unauthorized(new { error = "User id missing in token" });
 
             var character = await _characterService.CreateCharacterAsync(discordUserId, request);
             return CreatedAtAction(nameof(GetCharacter), new { id = character.Id }, character);
@@ -37,8 +40,12 @@ namespace DnDiscordAPI.Games.Controllers
         [HttpGet("my-characters")]
         public async Task<ActionResult<List<CharacterDto>>> GetMyCharacters()
         {
-            // Pour les tests, on utilise un userId par défaut si pas authentifié
-            var discordUserId = User.FindFirst("discord_id")?.Value ?? "test-user-123";
+            var discordUserId = User.FindFirst("sub")?.Value
+                ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (string.IsNullOrEmpty(discordUserId))
+                return Unauthorized(new { error = "User id missing in token" });
+
             var characters = await _characterService.GetUserCharactersAsync(discordUserId);
             return Ok(characters);
         }
