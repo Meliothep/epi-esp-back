@@ -1,4 +1,5 @@
-﻿using DnDiscordAPI.Games.Character.DTOs;
+﻿using System.Security.Claims;
+using DnDiscordAPI.Games.Character.DTOs;
 using DnDiscordAPI.Games.Character.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

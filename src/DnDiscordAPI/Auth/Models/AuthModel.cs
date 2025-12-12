@@ -74,3 +74,8 @@ public class AuthTokenResponse
     public string Token { get; set; } = string.Empty;
     public DnDiscordAPI.Models.User User { get; set; } = null!;
 }
+
+public class DiscordAuthUrlResponse
+{
+    public string Url { get; set; } = string.Empty;
+}
