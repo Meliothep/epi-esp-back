@@ -1,6 +1,7 @@
-using DNDiscord.Backend.Models;
-using DNDiscord.Backend.Services;
+using DnDiscordAPI.Auth.Services;
+using DnDiscordAPI.Models;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DnDiscordAPI.Controllers;
@@ -111,6 +112,53 @@ public class AuthController : ControllerBase
         // In a real app, you might want to blacklist the token or update a session
         _logger.LogInformation("User logged out");
         return Ok();
+    }
+
+    /// <summary>
+    /// DEV ONLY: Generate a test token without Discord OAuth
+    /// </summary>
+    [AllowAnonymous]
+    [HttpPost("dev/login")]
+    public ActionResult<AuthTokenResponse> DevLogin([FromBody] DevLoginRequest request)
+    {
+        // Only allow in development
+        var environment = HttpContext.RequestServices.GetRequiredService<IWebHostEnvironment>();
+        if (!environment.IsDevelopment())
+        {
+            return NotFound(); // Hide endpoint in production
+        }
+
+        // Default values if not provided
+        var userId = request.UserId ?? $"dev-user-{Guid.NewGuid()}";
+        var username = request.Username ?? "TestUser";
+        var email = request.Email ?? $"{username.ToLower()}@test.local";
+
+        _logger.LogInformation($"[DEV] Generating test token for user: {username} (ID: {userId})");
+
+        // Create or get user in memory store
+        if (!Users.TryGetValue(userId, out var user))
+        {
+            user = new User
+            {
+                Id = userId,
+                Username = username,
+                Email = email,
+                DiscordId = userId,
+                Avatar = null,
+                CreatedAt = DateTime.UtcNow,
+            };
+            Users[user.Id] = user;
+            _logger.LogInformation($"Created dev user: {user.Username}");
+        }
+
+        // Generate JWT token
+        var token = _tokenService.GenerateToken(user.Id, user.Username, user.Email);
+
+        return Ok(new AuthTokenResponse
+        {
+            Token = token,
+            User = user,
+        });
     }
 
     /// <summary>

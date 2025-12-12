@@ -10,9 +10,9 @@ services:
     volumes:
       - pgadmin-data:/var/lib/pgadmin
     networks:
-        - dndiscord-network
+      - dndiscord-network
 
-# ========== DnDiscord ==========
+  # ========== DnDiscord ==========
 
   dndiscordPostgres:
     container_name: dndiscordPostgres
@@ -23,12 +23,12 @@ services:
       POSTGRES_DB: "DnDiscordDB"
       PGDATA: "/data/postgres"
     volumes:
-       - local_pgdata:/data/postgres
+      - local_pgdata:/data/postgres
     ports:
       - "5432:5432"
     networks:
       - dndiscord-network
-    
+
   dndiscordservice:
     image: dndiscordservice
     build:
@@ -39,22 +39,29 @@ services:
         SERVICE: DnDiscordAPI
         PORT: 5054
     ports:
-        - 5054:5054
+      - 5054:5054
     environment:
-        - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_ENVIRONMENT=Production
+      - Jwt__SecretKey=${JWT_SECRET_KEY:-c13b64cb-d917-403b-b97c-da659b7da484}
+      - Jwt__Issuer=${JWT_ISSUER:-dndiscord-backend}
+      - Jwt__Audience=${JWT_AUDIENCE:-dndiscord-frontend}
+      - Jwt__ExpirationMinutes=${JWT_EXPIRATION_MINUTES:-10080}
+      - Discord__ClientId=${DISCORD_CLIENT_ID:-DISCORD_CLIENT_ID}
+      - Discord__ClientSecret=${DISCORD_CLIENT_SECRET:-DISCORD_CLIENT_SECRET}
+      - Discord__RedirectUri=${DISCORD_REDIRECT_URI:-http://localhost:3000/auth/callback}
     volumes:
-        - ~/.vsdbg:/remote_debugger:rw
+      - ~/.vsdbg:/remote_debugger:rw
     networks:
-        - dndiscord-network
-        - seq-net
+      - dndiscord-network
+      - seq-net
     depends_on:
       - dndiscordPostgres
 
 networks:
-    dndiscord-network:
-      driver: bridge
-    seq-net:
-      external: true
+  dndiscord-network:
+    driver: bridge
+  seq-net:
+    external: true
 
 volumes:
   local_pgdata:
