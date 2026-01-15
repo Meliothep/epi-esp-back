@@ -1,6 +1,6 @@
 using System.Text;
 using DnDiscord.Campaign;
-using DnDiscordAPI.Auth;
+using DnDiscordAPI.Auth.Services;
 using DnDiscordAPI.Games;
 using DnDiscordAPI.Games.Database;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -30,6 +30,10 @@ builder.Services.AddCors(options =>
               .AllowCredentials();
     });
 });
+
+// Enregistrement des services d'authentification
+builder.Services.AddHttpClient<IDiscordAuthService, DiscordAuthService>();
+builder.Services.AddScoped<ITokenService, TokenService>();
 
 // Configuration Swagger/OpenAPI
 builder.Services.AddSwaggerGen(c =>
@@ -104,7 +108,6 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-// Appliquer les migrations automatiquement au démarrage (non-blocking)
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
@@ -114,10 +117,20 @@ using (var scope = app.Services.CreateScope())
         dbContext.Database.Migrate();
         app.Logger.LogInformation("Database migrations applied successfully.");
     }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("PendingModelChangesWarning"))
+    {
+        if (app.Environment.IsProduction())
+        {
+            throw;
+        }
+    }
     catch (Exception ex)
     {
-        app.Logger.LogWarning(ex, "Database migration failed. The app will continue without database features. " +
-            "Make sure PostgreSQL is running with correct credentials if you need database features.");
+        app.Logger.LogError(ex, "An error occurred while applying database migrations.");
+        if (app.Environment.IsProduction())
+        {
+            throw;
+        }
     }
 }
 

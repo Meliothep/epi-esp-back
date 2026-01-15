@@ -3,6 +3,7 @@ using DnDiscordAPI.Games.Character.DTOs;
 using DnDiscordAPI.Games.Character.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace DnDiscordAPI.Games.Controllers
 {

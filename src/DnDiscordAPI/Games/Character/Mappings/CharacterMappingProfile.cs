@@ -12,7 +12,6 @@ namespace DnDiscordAPI.Games.Character.Mappings
             CreateMap<Models.Character, CharacterDto>()
                 .ForMember(dest => dest.RaceTraits, opt => opt.MapFrom(src => src.GetRaceTraits()))
                 .ForMember(dest => dest.ClassTraits, opt => opt.MapFrom(src => src.GetClassTraits()));
-            
             CreateMap<CharacterDto, Models.Character>();
 
             // AbilityScores mappings
@@ -22,6 +21,7 @@ namespace DnDiscordAPI.Games.Character.Mappings
             // Traits mappings
             CreateMap<RaceTraits, RaceTraitsDto>();
             CreateMap<ClassTraits, ClassTraitsDto>();
+
         }
     }
 }

@@ -52,7 +52,7 @@ namespace DnDiscordAPI.Games.Character.Services
                 Class = request.Class,
                 Race = request.Race,
                 Level = 1,
-                Abilities = _mapper.Map<AbilityScores>(request.Abilities),
+                Abilities = finalAbilities,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
