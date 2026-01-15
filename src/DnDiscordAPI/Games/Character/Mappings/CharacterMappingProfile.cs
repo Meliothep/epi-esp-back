@@ -25,4 +25,3 @@ namespace DnDiscordAPI.Games.Character.Mappings
         }
     }
 }
-

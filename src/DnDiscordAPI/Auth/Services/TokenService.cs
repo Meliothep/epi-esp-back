@@ -6,7 +6,7 @@ namespace DnDiscordAPI.Auth.Services;
 
 public interface ITokenService
 {
-    string GenerateToken(string userId, string username, string email);
+    string GenerateToken(string userId, string username, string email, string? avatar = null);
     ClaimsPrincipal? ValidateToken(string token);
 }
 
@@ -26,18 +26,24 @@ public class TokenService : ITokenService
         _audience = configuration["Jwt:Audience"] ?? "dndiscord-frontend";
     }
 
-    public string GenerateToken(string userId, string username, string email)
+    public string GenerateToken(string userId, string username, string email, string? avatar = null)
     {
         var key = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(_secretKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-        var claims = new[]
+        var claims = new List<Claim>
         {
             new Claim("sub", userId),
             new Claim("username", username),
             new Claim("email", email),
             new Claim(ClaimTypes.NameIdentifier, userId),
         };
+
+        // Add avatar claim if present
+        if (!string.IsNullOrEmpty(avatar))
+        {
+            claims.Add(new Claim("avatar", avatar));
+        }
 
         var token = new JwtSecurityToken(
             issuer: _issuer,
