@@ -4,6 +4,9 @@ using DnDiscord.Campaign.DataAccess.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace DnDiscord.Campaign.Controllers;
 
@@ -441,11 +444,31 @@ public class CampaignController : ControllerBase
     
     /// <summary>
     /// Gets the current user ID from the authentication context.
+    /// Converts the Discord ID (string) from JWT to a deterministic Guid.
     /// </summary>
     private Guid GetCurrentUserId()
     {
-        // TODO: Implement actual user ID extraction from JWT claims
-        return Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var discordId = User.FindFirst("sub")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(discordId))
+        {
+            _logger.LogError("Unable to extract user ID from JWT claims");
+            throw new UnauthorizedAccessException("User ID not found in token");
+        }
+
+        // Convert Discord ID string to deterministic Guid using MD5 hash
+        return ConvertDiscordIdToGuid(discordId);
+    }
+
+    /// <summary>
+    /// Converts a Discord ID (string) to a deterministic Guid using MD5 hashing.
+    /// </summary>
+    private static Guid ConvertDiscordIdToGuid(string discordId)
+    {
+        using var md5 = MD5.Create();
+        var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(discordId));
+        return new Guid(hash);
     }
 }
 

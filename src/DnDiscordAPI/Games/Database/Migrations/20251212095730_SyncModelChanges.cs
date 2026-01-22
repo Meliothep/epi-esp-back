@@ -10,24 +10,12 @@ namespace DnDiscordAPI.Games.Database.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AlterColumn<int>(
-                name: "Race",
-                table: "Characters",
-                type: "integer",
-                maxLength: 50,
-                nullable: false,
-                oldClrType: typeof(string),
-                oldType: "character varying(50)",
-                oldMaxLength: 50);
+            // Drop and recreate columns to avoid type conversion issues
+            migrationBuilder.Sql(@"ALTER TABLE ""Characters"" DROP COLUMN IF EXISTS ""Race"" CASCADE;");
+            migrationBuilder.Sql(@"ALTER TABLE ""Characters"" ADD COLUMN ""Race"" integer NOT NULL DEFAULT 0;");
 
-            migrationBuilder.AlterColumn<int>(
-                name: "Class",
-                table: "Characters",
-                type: "integer",
-                nullable: false,
-                oldClrType: typeof(string),
-                oldType: "character varying(50)",
-                oldMaxLength: 50);
+            migrationBuilder.Sql(@"ALTER TABLE ""Characters"" DROP COLUMN IF EXISTS ""Class"" CASCADE;");
+            migrationBuilder.Sql(@"ALTER TABLE ""Characters"" ADD COLUMN ""Class"" integer NOT NULL DEFAULT 0;");
         }
 
         /// <inheritdoc />

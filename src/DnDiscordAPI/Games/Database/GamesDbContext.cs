@@ -30,12 +30,10 @@ namespace DnDiscordAPI.Games.Database
                     .HasMaxLength(50);
 
                 entity.Property(e => e.Class)
-                    .IsRequired()
-                    .HasConversion<string>();
+                    .IsRequired();
 
                 entity.Property(e => e.Race)
-                    .IsRequired()
-                    .HasConversion<string>();
+                    .IsRequired();
 
                 // Configuration pour les AbilityScores (owned entity)
                 entity.OwnsOne(e => e.Abilities, abilities =>

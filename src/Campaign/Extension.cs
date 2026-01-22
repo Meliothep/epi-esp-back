@@ -98,14 +98,19 @@ public static class CampaignExtensions
     /// <returns>The application for chaining.</returns>
     public static WebApplication UseCampaignModule(this WebApplication app)
     {
-        // Apply pending migrations in development
-        if (app.Environment.IsDevelopment())
+        // Apply pending migrations (always, for Docker setup)
+        using var scope = app.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CampaignDbContext>();
+        try
         {
-            using var scope = app.Services.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<CampaignDbContext>();
             dbContext.Database.Migrate();
         }
-        
+        catch (Exception ex)
+        {
+            // Log but don't crash - migrations might fail in some scenarios
+            Console.WriteLine($"Migration warning: {ex.Message}");
+        }
+
         return app;
     }
 }

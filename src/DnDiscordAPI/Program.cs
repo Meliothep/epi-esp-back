@@ -1,5 +1,6 @@
 using System.Text;
 using DnDiscord.Campaign;
+using DnDiscordAPI.Auth;
 using DnDiscordAPI.Auth.Services;
 using DnDiscordAPI.Games;
 using DnDiscordAPI.Games.Database;
@@ -15,6 +16,7 @@ builder.Services.AddEndpointsApiExplorer();
 
 builder.AddGamesServices();
 builder.AddAuthServices();
+builder.AddCampaignModule();
 
 // CORS configuration
 var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() 
