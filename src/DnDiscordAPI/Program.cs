@@ -76,6 +76,27 @@ builder.Services
         // JWT Bearer debug events for troubleshooting authentication issues
         options.Events = new JwtBearerEvents
         {
+            OnMessageReceived = context =>
+            {
+                var path = context.HttpContext.Request.Path;
+                
+                var accessToken = context.Request.Query["access_token"];
+                
+                if (string.IsNullOrEmpty(accessToken))
+                {
+                    var authHeader = context.Request.Headers["Authorization"].ToString();
+                    if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                    {
+                        accessToken = authHeader.Substring("Bearer ".Length).Trim();
+                    }
+                }
+                
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            },
             OnAuthenticationFailed = context =>
             {
                 var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();

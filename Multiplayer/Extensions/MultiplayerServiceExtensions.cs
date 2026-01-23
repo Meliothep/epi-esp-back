@@ -11,6 +11,7 @@ public static class MultiplayerServiceExtensions
         // Services Singleton (thread-safe)
         services.AddSingleton<SessionManager>();
         services.AddSingleton<TurnManager>();
+        services.AddSingleton<MessageSequencer>();
 
         // Configuration SignalR
         services.AddSignalR(options =>
