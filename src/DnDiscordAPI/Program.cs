@@ -1,5 +1,6 @@
 using System.Text;
 using DnDiscord.Campaign;
+using DnDiscordAPI.Auth;
 using DnDiscordAPI.Auth.Services;
 using DnDiscordAPI.Games;
 using DnDiscordAPI.Games.Database;
@@ -30,10 +31,6 @@ builder.Services.AddCors(options =>
               .AllowCredentials();
     });
 });
-
-// Enregistrement des services d'authentification
-builder.Services.AddHttpClient<IDiscordAuthService, DiscordAuthService>();
-builder.Services.AddScoped<ITokenService, TokenService>();
 
 // Configuration Swagger/OpenAPI
 builder.Services.AddSwaggerGen(c =>
