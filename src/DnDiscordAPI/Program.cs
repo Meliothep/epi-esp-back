@@ -1,4 +1,5 @@
 using System.Text;
+using Multiplayer.Extensions;
 using DnDiscord.Campaign;
 using DnDiscordAPI.Auth;
 using DnDiscordAPI.Auth.Services;
@@ -7,12 +8,14 @@ using DnDiscordAPI.Games.Database;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Multiplayer.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Ajout des services
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddMultiplayerServices();
 
 builder.AddGamesServices();
 builder.AddAuthServices();
@@ -143,5 +146,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<GameHub>("/hubs/game");
 
 app.Run();
