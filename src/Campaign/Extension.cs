@@ -1,6 +1,7 @@
 using DnDiscord.Campaign.BL.Campaigns;
 using DnDiscord.Campaign.BL.Snapshots;
 using DnDiscord.Campaign.DataAccess;
+using DnDiscord.Campaign.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -67,12 +68,16 @@ public static class CampaignExtensions
     /// </summary>
     private static IHostApplicationBuilder AddCampaignServices(this IHostApplicationBuilder builder)
     {
+        // HttpContextAccessor for user context
+        builder.Services.AddHttpContextAccessor();
+
         // Singleton services (stateless validators)
         builder.Services.AddSingleton<ICampaignValidator, CampaignValidator>();
-        
+
         // Scoped services (per-request with DbContext dependency)
         builder.Services.AddScoped<ICampaignService, CampaignService>();
-        
+        builder.Services.AddScoped<IUserContextService, UserContextService>();
+
         return builder;
     }
     

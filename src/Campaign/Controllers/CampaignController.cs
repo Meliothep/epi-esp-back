@@ -1,12 +1,10 @@
 using DnDiscord.Campaign.BL.Campaigns;
 using DnDiscord.Campaign.BL.Campaigns.DTOs;
 using DnDiscord.Campaign.DataAccess.Models;
+using DnDiscord.Campaign.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace DnDiscord.Campaign.Controllers;
 
@@ -19,13 +17,16 @@ namespace DnDiscord.Campaign.Controllers;
 public class CampaignController : ControllerBase
 {
     private readonly ICampaignService _campaignService;
+    private readonly IUserContextService _userContextService;
     private readonly ILogger<CampaignController> _logger;
-    
+
     public CampaignController(
         ICampaignService campaignService,
+        IUserContextService userContextService,
         ILogger<CampaignController> logger)
     {
         _campaignService = campaignService;
+        _userContextService = userContextService;
         _logger = logger;
     }
     
@@ -43,7 +44,7 @@ public class CampaignController : ControllerBase
     {
         try
         {
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             var campaign = await _campaignService.CreateCampaignAsync(request, userId, ct);
             
             return CreatedAtAction(
@@ -135,7 +136,7 @@ public class CampaignController : ControllerBase
     {
         try
         {
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             var campaign = await _campaignService.UpdateCampaignAsync(id, request, userId, ct);
             
             if (campaign == null)
@@ -175,7 +176,7 @@ public class CampaignController : ControllerBase
     {
         try
         {
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             var deleted = await _campaignService.DeleteCampaignAsync(id, userId, hardDelete, ct);
             
             if (!deleted)
@@ -219,7 +220,7 @@ public class CampaignController : ControllerBase
     {
         try
         {
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             request ??= new GenerateInviteCodeRequest();
             
             var result = await _campaignService.GenerateInviteCodeAsync(id, request, userId, ct);
@@ -259,7 +260,7 @@ public class CampaignController : ControllerBase
     {
         try
         {
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             var campaign = await _campaignService.JoinCampaignAsync(request, userId, ct);
             
             return Ok(campaign);
@@ -307,7 +308,7 @@ public class CampaignController : ControllerBase
     {
         try
         {
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             var member = await _campaignService.AddMemberAsync(id, request, userId, ct);
             
             if (member == null)
@@ -348,7 +349,7 @@ public class CampaignController : ControllerBase
     {
         try
         {
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             var member = await _campaignService.UpdateMemberAsync(id, memberId, request, userId, ct);
             
             if (member == null)
@@ -388,7 +389,7 @@ public class CampaignController : ControllerBase
     {
         try
         {
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             var removed = await _campaignService.RemoveMemberAsync(id, memberId, userId, ct);
             
             if (!removed)
@@ -441,34 +442,5 @@ public class CampaignController : ControllerBase
     }
     
     #endregion
-    
-    /// <summary>
-    /// Gets the current user ID from the authentication context.
-    /// Converts the Discord ID (string) from JWT to a deterministic Guid.
-    /// </summary>
-    private Guid GetCurrentUserId()
-    {
-        var discordId = User.FindFirst("sub")?.Value
-            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-        if (string.IsNullOrEmpty(discordId))
-        {
-            _logger.LogError("Unable to extract user ID from JWT claims");
-            throw new UnauthorizedAccessException("User ID not found in token");
-        }
-
-        // Convert Discord ID string to deterministic Guid using MD5 hash
-        return ConvertDiscordIdToGuid(discordId);
-    }
-
-    /// <summary>
-    /// Converts a Discord ID (string) to a deterministic Guid using MD5 hashing.
-    /// </summary>
-    private static Guid ConvertDiscordIdToGuid(string discordId)
-    {
-        using var md5 = MD5.Create();
-        var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(discordId));
-        return new Guid(hash);
-    }
 }
 

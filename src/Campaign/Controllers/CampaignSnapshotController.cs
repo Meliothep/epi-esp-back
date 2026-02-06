@@ -1,11 +1,9 @@
 using DnDiscord.Campaign.BL.Snapshots;
 using DnDiscord.Campaign.BL.Snapshots.DTOs;
+using DnDiscord.Campaign.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace DnDiscord.Campaign.Controllers;
 
@@ -18,13 +16,16 @@ namespace DnDiscord.Campaign.Controllers;
 public class CampaignSnapshotController : ControllerBase
 {
     private readonly ISnapshotService _snapshotService;
+    private readonly IUserContextService _userContextService;
     private readonly ILogger<CampaignSnapshotController> _logger;
-    
+
     public CampaignSnapshotController(
         ISnapshotService snapshotService,
+        IUserContextService userContextService,
         ILogger<CampaignSnapshotController> logger)
     {
         _snapshotService = snapshotService;
+        _userContextService = userContextService;
         _logger = logger;
     }
     
@@ -46,7 +47,7 @@ public class CampaignSnapshotController : ControllerBase
         try
         {
             // TODO: Get actual user ID from authentication context
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             
             var snapshot = await _snapshotService.CreateSnapshotAsync(campaignId, request, userId, cancellationToken);
             
@@ -150,7 +151,7 @@ public class CampaignSnapshotController : ControllerBase
     {
         try
         {
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             request ??= new RestoreSnapshotRequest();
             
             var result = await _snapshotService.RestoreSnapshotAsync(campaignId, id, request, userId, cancellationToken);
@@ -245,7 +246,7 @@ public class CampaignSnapshotController : ControllerBase
     {
         try
         {
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             
             var snapshot = await _snapshotService.ImportSnapshotAsync(campaignId, request, userId, cancellationToken);
             
@@ -383,35 +384,6 @@ public class CampaignSnapshotController : ControllerBase
         }
         
         return NoContent();
-    }
-    
-    /// <summary>
-    /// Gets the current user ID from the authentication context.
-    /// Converts the Discord ID (string) from JWT to a deterministic Guid.
-    /// </summary>
-    private Guid GetCurrentUserId()
-    {
-        var discordId = User.FindFirst("sub")?.Value
-            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-        if (string.IsNullOrEmpty(discordId))
-        {
-            _logger.LogError("Unable to extract user ID from JWT claims");
-            throw new UnauthorizedAccessException("User ID not found in token");
-        }
-
-        // Convert Discord ID string to deterministic Guid using MD5 hash
-        return ConvertDiscordIdToGuid(discordId);
-    }
-
-    /// <summary>
-    /// Converts a Discord ID (string) to a deterministic Guid using MD5 hashing.
-    /// </summary>
-    private static Guid ConvertDiscordIdToGuid(string discordId)
-    {
-        using var md5 = MD5.Create();
-        var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(discordId));
-        return new Guid(hash);
     }
 }
 
