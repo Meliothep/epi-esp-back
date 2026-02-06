@@ -1,5 +1,6 @@
 using DnDiscord.Campaign.BL.Snapshots;
 using DnDiscord.Campaign.BL.Snapshots.DTOs;
+using DnDiscord.Campaign.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -15,13 +16,16 @@ namespace DnDiscord.Campaign.Controllers;
 public class CampaignSnapshotController : ControllerBase
 {
     private readonly ISnapshotService _snapshotService;
+    private readonly IUserContextService _userContextService;
     private readonly ILogger<CampaignSnapshotController> _logger;
-    
+
     public CampaignSnapshotController(
         ISnapshotService snapshotService,
+        IUserContextService userContextService,
         ILogger<CampaignSnapshotController> logger)
     {
         _snapshotService = snapshotService;
+        _userContextService = userContextService;
         _logger = logger;
     }
     
@@ -43,7 +47,7 @@ public class CampaignSnapshotController : ControllerBase
         try
         {
             // TODO: Get actual user ID from authentication context
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             
             var snapshot = await _snapshotService.CreateSnapshotAsync(campaignId, request, userId, cancellationToken);
             
@@ -147,7 +151,7 @@ public class CampaignSnapshotController : ControllerBase
     {
         try
         {
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             request ??= new RestoreSnapshotRequest();
             
             var result = await _snapshotService.RestoreSnapshotAsync(campaignId, id, request, userId, cancellationToken);
@@ -242,7 +246,7 @@ public class CampaignSnapshotController : ControllerBase
     {
         try
         {
-            var userId = GetCurrentUserId();
+            var userId = _userContextService.GetCurrentUserId();
             
             var snapshot = await _snapshotService.ImportSnapshotAsync(campaignId, request, userId, cancellationToken);
             
@@ -380,20 +384,6 @@ public class CampaignSnapshotController : ControllerBase
         }
         
         return NoContent();
-    }
-    
-    /// <summary>
-    /// Gets the current user ID from the authentication context.
-    /// </summary>
-    private Guid GetCurrentUserId()
-    {
-        // TODO: Implement actual user ID extraction from JWT claims
-        // For now, return a placeholder GUID
-        // In production, this would be:
-        // var claim = User.FindFirst(ClaimTypes.NameIdentifier);
-        // return Guid.Parse(claim?.Value ?? throw new UnauthorizedException());
-        
-        return Guid.Parse("00000000-0000-0000-0000-000000000001");
     }
 }
 

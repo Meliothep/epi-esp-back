@@ -16,6 +16,7 @@ builder.Services.AddEndpointsApiExplorer();
 
 builder.AddGamesServices();
 builder.AddAuthServices();
+builder.AddCampaignModule();
 
 // CORS configuration
 var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() 
