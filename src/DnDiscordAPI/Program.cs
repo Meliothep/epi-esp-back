@@ -33,10 +33,6 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Enregistrement des services d'authentification
-builder.Services.AddHttpClient<IDiscordAuthService, DiscordAuthService>();
-builder.Services.AddScoped<ITokenService, TokenService>();
-
 // Configuration Swagger/OpenAPI
 builder.Services.AddSwaggerGen(c =>
 {

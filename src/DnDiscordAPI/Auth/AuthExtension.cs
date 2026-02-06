@@ -1,10 +1,11 @@
+using Microsoft.AspNetCore.Builder;
 using DnDiscordAPI.Auth.Services;
 
 namespace DnDiscordAPI.Auth;
 
 public static class AuthExtension
 {
-    public static IHostApplicationBuilder AddAuthServices(this IHostApplicationBuilder builder)
+    public static WebApplicationBuilder AddAuthServices(this WebApplicationBuilder builder)
     {
         // Register HttpClient for Discord API calls
         builder.Services.AddHttpClient<IDiscordAuthService, DiscordAuthService>();
