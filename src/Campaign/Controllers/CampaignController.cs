@@ -79,7 +79,7 @@ public class CampaignController : ControllerBase
         [FromQuery] bool sortDescending = true,
         CancellationToken ct = default)
     {
-        var userId = GetCurrentUserId();
+        var userId = _userContextService.GetCurrentUserId();
         var filter = new CampaignFilterRequest
         {
             Page = page,
@@ -106,7 +106,7 @@ public class CampaignController : ControllerBase
         [FromRoute] Guid id,
         CancellationToken ct)
     {
-        var userId = GetCurrentUserId();
+        var userId = _userContextService.GetCurrentUserId();
         var campaign = await _campaignService.GetCampaignAsync(id, userId, ct);
         
         if (campaign == null)
@@ -289,7 +289,7 @@ public class CampaignController : ControllerBase
         [FromRoute] Guid id,
         CancellationToken ct)
     {
-        var userId = GetCurrentUserId();
+        var userId = _userContextService.GetCurrentUserId();
         var result = await _campaignService.GetMembersAsync(id, userId, ct);
         return Ok(result);
     }
@@ -425,7 +425,7 @@ public class CampaignController : ControllerBase
         [FromRoute] Guid id,
         CancellationToken ct)
     {
-        var userId = GetCurrentUserId();
+        var userId = _userContextService.GetCurrentUserId();
         var left = await _campaignService.LeaveCampaignAsync(id, userId, ct);
         
         if (!left)
