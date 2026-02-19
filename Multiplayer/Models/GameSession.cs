@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -16,6 +16,7 @@ namespace Multiplayer.Models
         public SessionState State { get; set; } = SessionState.Lobby;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime LastActivityAt { get; set; } = DateTime.UtcNow;
+        public DateTime? DmDisconnectedAt { get; set; }
         public int MaxPlayers { get; set; } = 6; // 5 joueurs + 1 DM
     }
 }

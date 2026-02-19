@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Multiplayer.Models;
 using static Multiplayer.Define;
@@ -10,10 +10,12 @@ public class SessionManager
     private readonly ConcurrentDictionary<string, GameSession> _sessions = new();
     private readonly ConcurrentDictionary<string, string> _connectionToSession = new(); // ConnectionId -> SessionId
     private readonly ILogger<SessionManager> _logger;
+    private readonly StateManager _stateManager;
 
-    public SessionManager(ILogger<SessionManager> logger)
+    public SessionManager(ILogger<SessionManager> logger, StateManager stateManager)
     {
         _logger = logger;
+        _stateManager = stateManager;
     }
 
     /// <summary>
@@ -81,6 +83,8 @@ public class SessionManager
                 existingPlayer.ConnectionId = connectionId;
                 existingPlayer.Status = ConnectionStatus.Connected;
                 existingPlayer.DisconnectedAt = null;
+                if (existingPlayer.Role == PlayerRole.DungeonMaster)
+                    session.DmDisconnectedAt = null;
 
                 _connectionToSession.TryAdd(connectionId, sessionId);
 
@@ -151,6 +155,7 @@ public class SessionManager
                 if (session.Players.Count == 0)
                 {
                     _sessions.TryRemove(sessionId, out _);
+                    _stateManager.RemoveSnapshot(sessionId);
                     _logger.LogInformation("Session {SessionId} removed (no players left)", sessionId);
                 }
 
@@ -177,7 +182,10 @@ public class SessionManager
                 {
                     player.Status = ConnectionStatus.Disconnected;
                     player.DisconnectedAt = DateTime.UtcNow;
+                    var wasDm = player.Role == PlayerRole.DungeonMaster;
                     player.ConnectionId = null;
+                    if (wasDm)
+                        session.DmDisconnectedAt = DateTime.UtcNow;
 
                     _logger.LogInformation("User {UserId} marked as disconnected in session {SessionId}",
                         player.UserId, sessionId);
@@ -186,6 +194,48 @@ public class SessionManager
         }
 
         _connectionToSession.TryRemove(connectionId, out _);
+    }
+
+    /// <summary>
+    /// Kick un joueur de la session (DM uniquement).
+    /// </summary>
+    public KickResult KickPlayer(string sessionId, Guid kickerUserId, Guid targetUserId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            return KickResult.Fail("Session not found");
+
+        lock (session.Players)
+        {
+            var dm = session.Players.FirstOrDefault(p => p.Role == PlayerRole.DungeonMaster);
+            if (dm == null || dm.UserId != kickerUserId)
+                return KickResult.Fail("Only the DM can kick players");
+
+            if (targetUserId == kickerUserId)
+                return KickResult.Fail("Cannot kick yourself");
+
+            var target = session.Players.FirstOrDefault(p => p.UserId == targetUserId);
+            if (target == null)
+                return KickResult.Fail("Player not in session");
+
+            var connectionId = target.ConnectionId;
+            session.Players.Remove(target);
+            session.LastActivityAt = DateTime.UtcNow;
+
+            if (!string.IsNullOrEmpty(connectionId))
+                _connectionToSession.TryRemove(connectionId, out _);
+
+            _logger.LogInformation("User {TargetUserId} kicked from session {SessionId} by DM {KickerUserId}",
+                targetUserId, sessionId, kickerUserId);
+
+            if (session.Players.Count == 0)
+            {
+                _sessions.TryRemove(sessionId, out _);
+                _stateManager.RemoveSnapshot(sessionId);
+                _logger.LogInformation("Session {SessionId} removed (no players left after kick)", sessionId);
+            }
+
+            return KickResult.Ok(connectionId ?? string.Empty);
+        }
     }
 
     /// <summary>
@@ -246,10 +296,43 @@ public class SessionManager
         foreach (var session in staleSessions)
         {
             _sessions.TryRemove(session.SessionId, out _);
+            _stateManager.RemoveSnapshot(session.SessionId);
+            foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
+                _connectionToSession.TryRemove(p.ConnectionId!, out _);
             _logger.LogInformation("Removed stale session {SessionId} (inactive since {LastActivity})",
                 session.SessionId, session.LastActivityAt);
         }
 
         return staleSessions.Count;
+    }
+
+    /// <summary>
+        /// Nettoyer les sessions où le DM a été déconnecté pour plus de dmDisconnectedThreshold,
+        /// ou la session a été inactive pour plus de inactivityThreshold.
+    /// </summary>
+    /// <param name="dmDisconnectedThreshold">e.g. 5 minutes - session supprimée si le DM est toujours déconnecté.</param>
+    /// <param name="inactivityThreshold">e.g. 10 minutes - session supprimée si aucune activité.</param>
+    /// <returns>Nombre de sessions supprimées.</returns>
+    public int CleanupStaleSessionsByPolicy(TimeSpan dmDisconnectedThreshold, TimeSpan inactivityThreshold)
+    {
+        var now = DateTime.UtcNow;
+        var toRemove = _sessions.Values
+            .Where(s =>
+                (s.DmDisconnectedAt.HasValue && (now - s.DmDisconnectedAt.Value) >= dmDisconnectedThreshold) ||
+                (s.LastActivityAt < now - inactivityThreshold))
+            .ToList();
+
+        foreach (var session in toRemove)
+        {
+            _sessions.TryRemove(session.SessionId, out _);
+            _stateManager.RemoveSnapshot(session.SessionId);
+            foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
+                _connectionToSession.TryRemove(p.ConnectionId!, out _);
+            _logger.LogInformation(
+                "Removed session {SessionId} (DM disconnected: {DmDisconnected}, LastActivity: {LastActivity})",
+                session.SessionId, session.DmDisconnectedAt, session.LastActivityAt);
+        }
+
+        return toRemove.Count;
     }
 }

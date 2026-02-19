@@ -36,3 +36,4 @@ namespace Multiplayer.Models.Messages
         /// </summary>
         public T Payload { get; set; } = default!;
     }
+}
