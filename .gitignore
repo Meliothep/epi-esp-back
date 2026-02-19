@@ -87,6 +87,9 @@ Desktop.ini
 # Application specific
 appsettings.*.local.json
 secrets.json
+.env
+.env.local
+.env.*.local
 
 # Entity Framework migrations - keep these
 !**/Migrations/*.cs
