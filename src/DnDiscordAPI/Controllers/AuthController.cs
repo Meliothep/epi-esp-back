@@ -37,22 +37,39 @@ public class AuthController : ControllerBase
     [HttpGet("discord/url")]
     public ActionResult<DiscordAuthUrlResponse> GetDiscordAuthUrl()
     {
+        var authUrl = GetDiscordOAuthUrl();
+        if (string.IsNullOrEmpty(authUrl))
+            return StatusCode(500, new { error = "Discord OAuth is not configured" });
+        return Ok(new DiscordAuthUrlResponse { Url = authUrl });
+    }
+
+    /// <summary>
+    /// Redirect (302) to Discord OAuth. Use this for popup/login from contexts where
+    /// connect-src CSP blocks fetch (e.g. Discord embed). No XHR — just open this URL.
+    /// </summary>
+    [AllowAnonymous]
+    [HttpGet("discord/redirect")]
+    public IActionResult DiscordRedirect()
+    {
+        var authUrl = GetDiscordOAuthUrl();
+        if (string.IsNullOrEmpty(authUrl))
+            return StatusCode(500, new { error = "Discord OAuth is not configured" });
+        return Redirect(authUrl);
+    }
+
+    private string? GetDiscordOAuthUrl()
+    {
         var clientId = _configuration["Discord:ClientId"];
         var redirectUri = _configuration["Discord:RedirectUri"];
-        
         if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(redirectUri))
         {
             _logger.LogError("Discord OAuth configuration is missing");
-            return StatusCode(500, new { error = "Discord OAuth is not configured" });
+            return null;
         }
-
         var scope = "identify email guilds";
         var encodedRedirectUri = Uri.EscapeDataString(redirectUri);
         var encodedScope = Uri.EscapeDataString(scope);
-        
-        var authUrl = $"https://discord.com/api/oauth2/authorize?client_id={clientId}&redirect_uri={encodedRedirectUri}&response_type=code&scope={encodedScope}";
-        
-        return Ok(new DiscordAuthUrlResponse { Url = authUrl });
+        return $"https://discord.com/api/oauth2/authorize?client_id={clientId}&redirect_uri={encodedRedirectUri}&response_type=code&scope={encodedScope}";
     }
 
     /// <summary>
