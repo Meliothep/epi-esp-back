@@ -45,19 +45,19 @@ public class AuthController : ControllerBase
 
     /// <summary>
     /// Redirect (302) to Discord OAuth. Use this for popup/login from contexts where
-    /// connect-src CSP blocks fetch (e.g. Discord embed). No XHR — just open this URL.
+    /// connect-src CSP blocks fetch (e.g. Discord embed). Optional state = return URL when popup is blocked.
     /// </summary>
     [AllowAnonymous]
     [HttpGet("discord/redirect")]
-    public IActionResult DiscordRedirect()
+    public IActionResult DiscordRedirect([FromQuery] string? state = null)
     {
-        var authUrl = GetDiscordOAuthUrl();
+        var authUrl = GetDiscordOAuthUrl(state);
         if (string.IsNullOrEmpty(authUrl))
             return StatusCode(500, new { error = "Discord OAuth is not configured" });
         return Redirect(authUrl);
     }
 
-    private string? GetDiscordOAuthUrl()
+    private string? GetDiscordOAuthUrl(string? state = null)
     {
         var clientId = _configuration["Discord:ClientId"];
         var redirectUri = _configuration["Discord:RedirectUri"];
@@ -69,7 +69,10 @@ public class AuthController : ControllerBase
         var scope = "identify email guilds";
         var encodedRedirectUri = Uri.EscapeDataString(redirectUri);
         var encodedScope = Uri.EscapeDataString(scope);
-        return $"https://discord.com/api/oauth2/authorize?client_id={clientId}&redirect_uri={encodedRedirectUri}&response_type=code&scope={encodedScope}";
+        var url = $"https://discord.com/api/oauth2/authorize?client_id={clientId}&redirect_uri={encodedRedirectUri}&response_type=code&scope={encodedScope}";
+        if (!string.IsNullOrEmpty(state))
+            url += "&state=" + Uri.EscapeDataString(state);
+        return url;
     }
 
     /// <summary>
