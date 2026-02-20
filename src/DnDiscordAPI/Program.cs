@@ -11,6 +11,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Multiplayer.Hubs;
+using DnDiscordAPI.Messages.Hubs;
+using DnDiscordAPI.Messages.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -70,6 +72,17 @@ var jwtSecret = jwtSection["SecretKey"]
     ?? throw new InvalidOperationException("Jwt:SecretKey must be configured");
 var jwtIssuer = jwtSection["Issuer"] ?? "dndiscord-backend";
 var jwtAudience = jwtSection["Audience"] ?? "dndiscord-frontend";
+
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = true;
+})
+.AddJsonProtocol(options =>
+{
+    options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+});
+
+builder.Services.AddSingleton<SignalRService>(); // Messages → front via SignalR
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -198,5 +211,6 @@ app.MapHealthChecks("/api/health", new HealthCheckOptions
     ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
 });
 app.MapHub<GameHub>("/hubs/game");
+app.MapHub<MessageHub>("/hubs/messages").RequireCors("AllowFrontend");
 
 app.Run();
