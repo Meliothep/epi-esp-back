@@ -26,15 +26,29 @@ builder.AddCampaignModule();
 // CORS configuration
 var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() 
     ?? new[] { "http://localhost:3000" };
+var corsOriginsSet = new HashSet<string>(corsOrigins, StringComparer.OrdinalIgnoreCase);
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins(corsOrigins)
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
+        policy.SetIsOriginAllowed(origin =>
+            {
+                if (string.IsNullOrEmpty(origin)) return false;
+                try
+                {
+                    var uri = new Uri(origin);
+                    if (corsOriginsSet.Contains(origin)) return true;
+                    // Activités Discord : *.discordsays.com
+                    var host = uri.Host;
+                    return host.Equals("discordsays.com", StringComparison.OrdinalIgnoreCase)
+                        || host.EndsWith(".discordsays.com", StringComparison.OrdinalIgnoreCase);
+                }
+                catch { return false; }
+            })
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 
