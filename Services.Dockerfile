@@ -1,7 +1,7 @@
 # Utilise une image de base ASP.NET pour l'exécution
 FROM mcr.microsoft.com/dotnet/sdk:9.0@sha256:3fcf6f1e809c0553f9feb222369f58749af314af6f063f389cbd2f913b4ad556 AS base
 ARG CONFIGURATION=Release
-ARG SERVICE=Multiplayer
+ARG SERVICE=DnDiscordAPI
 ARG PORT=8080
 
 WORKDIR /app
@@ -17,7 +17,7 @@ USER app
 # Étape de construction
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:9.0@sha256:3fcf6f1e809c0553f9feb222369f58749af314af6f063f389cbd2f913b4ad556 AS build
 ARG CONFIGURATION=Release
-ARG SERVICE=Multiplayer
+ARG SERVICE=DnDiscordAPI
 ARG PORT=8080
 
 WORKDIR /src
@@ -34,12 +34,12 @@ RUN dotnet build "src/${SERVICE}/${SERVICE}.csproj" -c $CONFIGURATION -o /app/bu
 # Étape de publication
 FROM build AS publish
 ARG CONFIGURATION=Release
-ARG SERVICE=Multiplayer
+ARG SERVICE=DnDiscordAPI
 RUN dotnet publish "src/${SERVICE}/${SERVICE}.csproj" -c $CONFIGURATION -o /app/publish /p:UseAppHost=false
 
 # Étape finale : préparation de l'image pour l'exécution
 FROM base AS final
-ARG SERVICE=Multiplayer
+ARG SERVICE=DnDiscordAPI
 USER root
 WORKDIR /app
 COPY --from=publish /app/publish .
