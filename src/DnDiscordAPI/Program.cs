@@ -172,6 +172,14 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.Remove("X-Frame-Options");
+    context.Response.Headers.Add("Content-Security-Policy", "frame-ancestors 'self' https://discord.com https://*.discord.com https://*.discordsays.com");
+    
+    await next();
+});
+
 // Configure modular middleware
 app.UseCors("AllowFrontend");
 
