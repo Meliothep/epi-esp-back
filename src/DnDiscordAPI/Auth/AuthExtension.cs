@@ -13,6 +13,9 @@ public static class AuthExtension
         // Register token service
         builder.Services.AddScoped<ITokenService, TokenService>();
 
+        // In-memory user store (shared between Auth and Discord Activity)
+        builder.Services.AddSingleton<IUserStore, UserStoreService>();
+
         return builder;
     }
 }

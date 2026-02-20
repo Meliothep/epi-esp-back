@@ -17,6 +17,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Ajout des services
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddHttpClient();
 builder.Services.AddMultiplayerServices();
 
 builder.AddGamesServices();
