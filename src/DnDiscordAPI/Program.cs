@@ -1,4 +1,6 @@
 using System.Text;
+using HealthChecks.UI.Client;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Multiplayer.Extensions;
 using DnDiscord.Campaign;
 using DnDiscordAPI.Auth;
@@ -168,6 +170,10 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHealthChecks("/api/health", new HealthCheckOptions
+{
+    ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
+});
 app.MapHub<GameHub>("/hubs/game");
 
 app.Run();
