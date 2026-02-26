@@ -411,8 +411,7 @@ public class GameHub : Hub
 
         _logger.LogDebug("Unit {UnitId} moved in session {SessionId}", payload.UnitId, sessionId);
 
-        // Broadcaster à tous les joueurs de la session
-        await Clients.Group(sessionId).SendAsync("UnitMoved", message);
+        await Clients.OthersInGroup(sessionId).SendAsync("UnitMoved", message);
     }
 
     /// <summary>
