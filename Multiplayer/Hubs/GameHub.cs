@@ -1,3 +1,4 @@
+using DnDiscord.Campaign.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
@@ -16,18 +17,20 @@ public class GameHub : Hub
     private readonly MessageSequencer _messageSequencer;
     private readonly StateManager _stateManager;
     private readonly IGameActionValidator _validator;
+    private readonly IUserContextService _userContextService;
 
     /// <summary>
     /// Constructeur du GameHub
     /// </summary>
     public GameHub(ILogger<GameHub> logger, SessionManager sessionManager, MessageSequencer messageSequencer,
-        StateManager stateManager, IGameActionValidator validator)
+        StateManager stateManager, IGameActionValidator validator, IUserContextService userContextService)
     {
         _logger = logger;
         _sessionManager = sessionManager;
         _messageSequencer = messageSequencer;
         _stateManager = stateManager;
         _validator = validator;
+        _userContextService = userContextService;
     }
 
     /// <summary>
@@ -213,22 +216,19 @@ public class GameHub : Hub
         await Clients.Caller.SendAsync("Pong", DateTime.UtcNow);
     }
 
+    /// <summary>
+    /// Récupère l'ID utilisateur (Guid) depuis le JWT.
+    /// Utilise le même service que l'API Campaign pour convertir l'ID Discord en Guid.
+    /// </summary>
     private Guid GetUserId()
     {
-        var userIdClaim = Context.User?.FindFirst("sub")?.Value
-                          ?? Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
-        {
-            throw new HubException("Invalid or missing user ID in token");
-        }
-
-        return userId;
+        return _userContextService.GetCurrentUserId();
     }
 
     private string GetUserName()
     {
-        return Context.User?.FindFirst("name")?.Value
+        return Context.User?.FindFirst("username")?.Value
+               ?? Context.User?.FindFirst("name")?.Value
                ?? Context.User?.FindFirst(ClaimTypes.Name)?.Value
                ?? "Unknown";
     }

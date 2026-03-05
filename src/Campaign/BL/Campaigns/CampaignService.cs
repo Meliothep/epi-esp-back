@@ -109,7 +109,9 @@ public class CampaignService : ICampaignService
             return null;
         }
         
-        return MapToDetailResponse(campaign);
+        var response = MapToDetailResponse(campaign);
+        response.IsDungeonMaster = campaign.DungeonMasterId == userId;
+        return response;
     }
     
     /// <inheritdoc />
