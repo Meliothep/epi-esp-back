@@ -210,7 +210,7 @@ app.MapHealthChecks("/api/health", new HealthCheckOptions
 {
     ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
 });
-app.MapHub<GameHub>("/hubs/game");
+app.MapHub<GameHub>("/hubs/game").RequireCors("AllowFrontend");
 app.MapHub<MessageHub>("/hubs/messages").RequireCors("AllowFrontend");
 
 app.Run();
