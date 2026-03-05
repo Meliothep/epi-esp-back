@@ -205,12 +205,13 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.MapHub<GameHub>("/hubs/game").RequireCors("AllowFrontend");
+app.MapHub<MessageHub>("/hubs/messages").RequireCors("AllowFrontend");
+
 app.MapControllers();
 app.MapHealthChecks("/api/health", new HealthCheckOptions
 {
     ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
 });
-app.MapHub<GameHub>("/hubs/game").RequireCors("AllowFrontend");
-app.MapHub<MessageHub>("/hubs/messages").RequireCors("AllowFrontend");
 
 app.Run();
