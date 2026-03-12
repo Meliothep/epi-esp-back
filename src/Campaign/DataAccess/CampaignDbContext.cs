@@ -64,9 +64,6 @@ public class CampaignDbContext : DbContext
             entity.Property(c => c.SettingsJson)
                 .HasColumnType("jsonb");
 
-            entity.Property(c => c.CampaignTreeDefinition)
-                .HasColumnType("json");
-
             entity.Property(c => c.ImageUrl)
                 .HasMaxLength(2000);
 
@@ -131,7 +128,6 @@ public class CampaignDbContext : DbContext
             entity.HasOne(s => s.Campaign)
                 .WithMany(c => c.Snapshots)
                 .HasForeignKey(s => s.CampaignId)
-                .IsRequired(false)
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(s => s.CampaignId);
@@ -176,7 +172,6 @@ public class CampaignDbContext : DbContext
             entity.HasOne(m => m.Campaign)
                 .WithMany(c => c.Members)
                 .HasForeignKey(m => m.CampaignId)
-                .IsRequired(false)
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Indexes

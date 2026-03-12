@@ -28,9 +28,6 @@ namespace DnDiscord.Campaign.DataAccess.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<string>("CampaignTreeDefinition")
-                        .HasColumnType("json");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -216,7 +213,8 @@ namespace DnDiscord.Campaign.DataAccess.Migrations
                     b.HasOne("DnDiscord.Campaign.DataAccess.Models.Campaign", "Campaign")
                         .WithMany("Members")
                         .HasForeignKey("CampaignId")
-                        .OnDelete(DeleteBehavior.Cascade);
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("Campaign");
                 });
@@ -226,7 +224,8 @@ namespace DnDiscord.Campaign.DataAccess.Migrations
                     b.HasOne("DnDiscord.Campaign.DataAccess.Models.Campaign", "Campaign")
                         .WithMany("Snapshots")
                         .HasForeignKey("CampaignId")
-                        .OnDelete(DeleteBehavior.Cascade);
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("Campaign");
                 });

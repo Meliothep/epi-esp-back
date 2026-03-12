@@ -66,12 +66,7 @@ public class Campaign
     /// Unique invite code for private campaigns.
     /// </summary>
     public string? InviteCode { get; set; }
-
-    /// <summary>
-    /// Unique invite code for private campaigns.
-    /// </summary>
-    public string? CampaignTreeDefinition { get; set; }
-
+    
     /// <summary>
     /// When the invite code expires (null = never).
     /// </summary>
