@@ -21,11 +21,13 @@ services:
       POSTGRES_USER: "DnDiscord"
       POSTGRES_PASSWORD: "DnDiscordSecured"
       POSTGRES_DB: "DnDiscordDB"
+      POSTGRES_HOST_AUTH_METHOD: "md5"
+      POSTGRES_INITDB_ARGS: "--auth=md5"
       PGDATA: "/data/postgres"
     volumes:
       - local_pgdata:/data/postgres
     ports:
-      - "5432:5432"
+      - "5433:5432"
     networks:
       - dndiscord-network
 
