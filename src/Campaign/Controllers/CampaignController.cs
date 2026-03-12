@@ -29,9 +29,9 @@ public class CampaignController : ControllerBase
         _userContextService = userContextService;
         _logger = logger;
     }
-    
+
     #region Campaign CRUD
-    
+
     /// <summary>
     /// Creates a new campaign.
     /// </summary>
@@ -46,7 +46,7 @@ public class CampaignController : ControllerBase
         {
             var userId = _userContextService.GetCurrentUserId();
             var campaign = await _campaignService.CreateCampaignAsync(request, userId, ct);
-            
+
             return CreatedAtAction(
                 nameof(GetCampaign),
                 new { id = campaign.Id },
@@ -62,7 +62,49 @@ public class CampaignController : ControllerBase
             });
         }
     }
-    
+
+    [HttpPut("{id:guid}/manager")]
+    [ProducesResponseType(typeof(CampaignDetailResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<CampaignDetailResponse>> UpdateTreeDefinition([FromRoute] Guid id,
+        [FromBody] EditCampaignManager request,
+        CancellationToken ct)
+    {
+        try
+        {
+            var userId = _userContextService.GetCurrentUserId();
+            var campaign = await _campaignService.UpdateCampaignManagerAsync(request, id, userId,ct);
+            return Ok(campaign);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Title = "Forbidden",
+                Detail = ex.Message,
+                Status = StatusCodes.Status403Forbidden
+            });
+        }
+        catch (CampaignException ex)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Update Failed",
+                Detail = ex.Message,
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error updating campaign {CampaignId}", id);
+            return StatusCode(StatusCodes.Status500InternalServerError, new ProblemDetails
+            {
+                Title = "Internal Server Error",
+                Status = StatusCodes.Status500InternalServerError
+            });
+        }
+    }
+
     /// <summary>
     /// Gets a list of campaigns.
     /// </summary>
@@ -91,11 +133,11 @@ public class CampaignController : ControllerBase
             SortBy = sortBy,
             SortDescending = sortDescending
         };
-        
+
         var result = await _campaignService.ListCampaignsAsync(filter, userId, ct);
         return Ok(result);
     }
-    
+
     /// <summary>
     /// Gets a campaign by ID.
     /// </summary>
@@ -108,7 +150,7 @@ public class CampaignController : ControllerBase
     {
         var userId = _userContextService.GetCurrentUserId();
         var campaign = await _campaignService.GetCampaignAsync(id, userId, ct);
-        
+
         if (campaign == null)
         {
             return NotFound(new ProblemDetails
@@ -118,10 +160,10 @@ public class CampaignController : ControllerBase
                 Status = StatusCodes.Status404NotFound
             });
         }
-        
+
         return Ok(campaign);
     }
-    
+
     /// <summary>
     /// Updates a campaign.
     /// </summary>
@@ -138,7 +180,7 @@ public class CampaignController : ControllerBase
         {
             var userId = _userContextService.GetCurrentUserId();
             var campaign = await _campaignService.UpdateCampaignAsync(id, request, userId, ct);
-            
+
             if (campaign == null)
             {
                 return NotFound(new ProblemDetails
@@ -148,7 +190,7 @@ public class CampaignController : ControllerBase
                     Status = StatusCodes.Status404NotFound
                 });
             }
-            
+
             return Ok(campaign);
         }
         catch (CampaignException ex)
@@ -161,7 +203,7 @@ public class CampaignController : ControllerBase
             });
         }
     }
-    
+
     /// <summary>
     /// Deletes a campaign.
     /// </summary>
@@ -178,7 +220,7 @@ public class CampaignController : ControllerBase
         {
             var userId = _userContextService.GetCurrentUserId();
             var deleted = await _campaignService.DeleteCampaignAsync(id, userId, hardDelete, ct);
-            
+
             if (!deleted)
             {
                 return NotFound(new ProblemDetails
@@ -188,7 +230,7 @@ public class CampaignController : ControllerBase
                     Status = StatusCodes.Status404NotFound
                 });
             }
-            
+
             return NoContent();
         }
         catch (CampaignException ex)
@@ -201,11 +243,11 @@ public class CampaignController : ControllerBase
             });
         }
     }
-    
+
     #endregion
-    
+
     #region Invite Codes
-    
+
     /// <summary>
     /// Generates a new invite code for a campaign.
     /// </summary>
@@ -222,9 +264,9 @@ public class CampaignController : ControllerBase
         {
             var userId = _userContextService.GetCurrentUserId();
             request ??= new GenerateInviteCodeRequest();
-            
+
             var result = await _campaignService.GenerateInviteCodeAsync(id, request, userId, ct);
-            
+
             if (result == null)
             {
                 return NotFound(new ProblemDetails
@@ -234,7 +276,7 @@ public class CampaignController : ControllerBase
                     Status = StatusCodes.Status404NotFound
                 });
             }
-            
+
             return Ok(result);
         }
         catch (CampaignException ex)
@@ -247,7 +289,7 @@ public class CampaignController : ControllerBase
             });
         }
     }
-    
+
     /// <summary>
     /// Joins a campaign using an invite code.
     /// </summary>
@@ -262,7 +304,7 @@ public class CampaignController : ControllerBase
         {
             var userId = _userContextService.GetCurrentUserId();
             var campaign = await _campaignService.JoinCampaignAsync(request, userId, ct);
-            
+
             return Ok(campaign);
         }
         catch (CampaignException ex)
@@ -275,11 +317,11 @@ public class CampaignController : ControllerBase
             });
         }
     }
-    
+
     #endregion
-    
+
     #region Members
-    
+
     /// <summary>
     /// Gets the list of members in a campaign.
     /// </summary>
@@ -293,7 +335,7 @@ public class CampaignController : ControllerBase
         var result = await _campaignService.GetMembersAsync(id, userId, ct);
         return Ok(result);
     }
-    
+
     /// <summary>
     /// Adds a member to a campaign.
     /// </summary>
@@ -310,7 +352,7 @@ public class CampaignController : ControllerBase
         {
             var userId = _userContextService.GetCurrentUserId();
             var member = await _campaignService.AddMemberAsync(id, request, userId, ct);
-            
+
             if (member == null)
             {
                 return NotFound(new ProblemDetails
@@ -320,7 +362,7 @@ public class CampaignController : ControllerBase
                     Status = StatusCodes.Status404NotFound
                 });
             }
-            
+
             return CreatedAtAction(nameof(GetMembers), new { id }, member);
         }
         catch (CampaignException ex)
@@ -333,7 +375,7 @@ public class CampaignController : ControllerBase
             });
         }
     }
-    
+
     /// <summary>
     /// Updates a campaign member.
     /// </summary>
@@ -351,7 +393,7 @@ public class CampaignController : ControllerBase
         {
             var userId = _userContextService.GetCurrentUserId();
             var member = await _campaignService.UpdateMemberAsync(id, memberId, request, userId, ct);
-            
+
             if (member == null)
             {
                 return NotFound(new ProblemDetails
@@ -361,7 +403,7 @@ public class CampaignController : ControllerBase
                     Status = StatusCodes.Status404NotFound
                 });
             }
-            
+
             return Ok(member);
         }
         catch (CampaignException ex)
@@ -374,7 +416,7 @@ public class CampaignController : ControllerBase
             });
         }
     }
-    
+
     /// <summary>
     /// Removes a member from a campaign.
     /// </summary>
@@ -391,7 +433,7 @@ public class CampaignController : ControllerBase
         {
             var userId = _userContextService.GetCurrentUserId();
             var removed = await _campaignService.RemoveMemberAsync(id, memberId, userId, ct);
-            
+
             if (!removed)
             {
                 return NotFound(new ProblemDetails
@@ -401,7 +443,7 @@ public class CampaignController : ControllerBase
                     Status = StatusCodes.Status404NotFound
                 });
             }
-            
+
             return NoContent();
         }
         catch (CampaignException ex)
@@ -414,7 +456,7 @@ public class CampaignController : ControllerBase
             });
         }
     }
-    
+
     /// <summary>
     /// Leaves a campaign (for the current user).
     /// </summary>
@@ -427,7 +469,7 @@ public class CampaignController : ControllerBase
     {
         var userId = _userContextService.GetCurrentUserId();
         var left = await _campaignService.LeaveCampaignAsync(id, userId, ct);
-        
+
         if (!left)
         {
             return NotFound(new ProblemDetails
@@ -437,10 +479,10 @@ public class CampaignController : ControllerBase
                 Status = StatusCodes.Status404NotFound
             });
         }
-        
+
         return NoContent();
     }
-    
+
     #endregion
 }
 

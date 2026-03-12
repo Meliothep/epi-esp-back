@@ -23,7 +23,8 @@ namespace DnDiscord.Campaign.DataAccess.Migrations
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     LastPlayedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
-                    SettingsJson = table.Column<string>(type: "jsonb", nullable: true)
+                    SettingsJson = table.Column<string>(type: "jsonb", nullable: true),
+                    CampaignTreeDefinition = table.Column<string>(type: "json", nullable: true)
                 },
                 constraints: table =>
                 {

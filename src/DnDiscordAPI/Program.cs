@@ -3,6 +3,7 @@ using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Multiplayer.Extensions;
 using DnDiscord.Campaign;
+using DnDiscord.Campaign.DataAccess;
 using DnDiscordAPI.Auth;
 using DnDiscordAPI.Auth.Services;
 using DnDiscordAPI.Games;
@@ -24,7 +25,6 @@ builder.Services.AddMultiplayerServices();
 
 builder.AddGamesServices();
 builder.AddAuthServices();
-builder.AddCampaignModule();
 
 // CORS configuration
 var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() 
@@ -158,33 +158,15 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
+builder.AddGamesServices(builder.Configuration);
+
+builder.Services.AddCampaignModule(builder.Configuration);
+
+builder.Services.AddHttpContextAccessor();
+
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
-{
-    var dbContext = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
-    try
-    {
-        app.Logger.LogInformation("Applying database migrations...");
-        dbContext.Database.Migrate();
-        app.Logger.LogInformation("Database migrations applied successfully.");
-    }
-    catch (InvalidOperationException ex) when (ex.Message.Contains("PendingModelChangesWarning"))
-    {
-        if (app.Environment.IsProduction())
-        {
-            throw;
-        }
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogError(ex, "An error occurred while applying database migrations.");
-        if (app.Environment.IsProduction())
-        {
-            throw;
-        }
-    }
-}
+app.UseHttpsRedirection();
 
 app.Use(async (context, next) =>
 {
@@ -197,9 +179,10 @@ app.Use(async (context, next) =>
 // Configure modular middleware
 app.UseCors("AllowFrontend");
 
+app.UseGamesModule();
 app.UseCampaignModule();
+
 app.MapDefaultEndpoints();
-app.UseHttpsRedirection();
 
 // Auth pipeline
 app.UseAuthentication();

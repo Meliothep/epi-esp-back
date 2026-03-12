@@ -3,6 +3,7 @@ using DnDiscord.Campaign.BL.Campaigns.DTOs;
 using DnDiscord.Campaign.DataAccess;
 using DnDiscord.Campaign.DataAccess.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using CampaignEntity = DnDiscord.Campaign.DataAccess.Models.Campaign;
 
@@ -15,6 +16,7 @@ public interface ICampaignService
 {
     // Campaign CRUD
     Task<CampaignDetailResponse> CreateCampaignAsync(CreateCampaignRequest request, Guid userId, CancellationToken ct = default);
+    Task<CampaignDetailResponse> UpdateCampaignManagerAsync(EditCampaignManager request, Guid CampaignId, Guid userId, CancellationToken ct = default);
     Task<CampaignDetailResponse?> GetCampaignAsync(Guid campaignId, Guid userId, CancellationToken ct = default);
     Task<CampaignListResponse> ListCampaignsAsync(CampaignFilterRequest filter, Guid userId, CancellationToken ct = default);
     Task<CampaignDetailResponse?> UpdateCampaignAsync(Guid campaignId, UpdateCampaignRequest request, Guid userId, CancellationToken ct = default);
@@ -39,34 +41,63 @@ public class CampaignService : ICampaignService
 {
     private readonly CampaignDbContext _dbContext;
     private readonly ICampaignValidator _validator;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<CampaignService> _logger;
     
     public CampaignService(
         CampaignDbContext dbContext,
         ICampaignValidator validator,
+        IServiceProvider serviceProvider,
         ILogger<CampaignService> logger)
     {
+        _serviceProvider = serviceProvider;
         _dbContext = dbContext;
         _validator = validator;
         _logger = logger;
     }
-    
+
     #region Campaign CRUD
-    
+
     /// <inheritdoc />
+    public async Task<CampaignDetailResponse> UpdateCampaignManagerAsync(
+    EditCampaignManager request,
+    Guid campaignId,
+    Guid userId, CancellationToken ct)
+    {
+        _logger.LogInformation("Updating campaign {CampaignId}", campaignId);
+
+        var campaign = await _dbContext.Campaigns.FindAsync(new object?[] { campaignId }, cancellationToken: ct)
+            ?? throw new CampaignException($"Campaign {campaignId} not found");
+
+        if (campaign.DungeonMasterId != userId)
+            throw new UnauthorizedAccessException("You are not the owner of this campaign");
+
+        var validation = _validator.ValidateCampaignTreeDefinition(request);
+        if (!validation.IsValid)
+            throw new CampaignException($"Validation failed: {string.Join(", ", validation.Errors.Select(e => e.Message))}");
+
+        campaign.CampaignTreeDefinition = request.CampaignTreeDefinition;
+        campaign.UpdatedAt = DateTime.UtcNow;
+
+        await _dbContext.SaveChangesAsync(ct);
+        _logger.LogInformation("Updated campaign {CampaignId}", campaignId);
+
+        return MapToDetailResponse(campaign);
+    }
+
     public async Task<CampaignDetailResponse> CreateCampaignAsync(
-        CreateCampaignRequest request, 
-        Guid userId, 
+        CreateCampaignRequest request,
+        Guid userId,
         CancellationToken ct = default)
     {
         _logger.LogInformation("Creating campaign '{Name}' for user {UserId}", request.Name, userId);
-        
+
         var validation = _validator.ValidateCreate(request);
         if (!validation.IsValid)
         {
             throw new CampaignException($"Validation failed: {string.Join(", ", validation.Errors.Select(e => e.Message))}");
         }
-        
+
         var campaign = new CampaignEntity
         {
             Id = Guid.NewGuid(),
@@ -78,17 +109,18 @@ public class CampaignService : ICampaignService
             MaxPlayers = request.MaxPlayers,
             IsPublic = request.IsPublic,
             CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            UpdatedAt = DateTime.UtcNow,
+            CampaignTreeDefinition = null
         };
-        
+
         _dbContext.Campaigns.Add(campaign);
         await _dbContext.SaveChangesAsync(ct);
-        
+
         _logger.LogInformation("Created campaign {CampaignId} '{Name}'", campaign.Id, campaign.Name);
-        
+
         return MapToDetailResponse(campaign);
     }
-    
+
     /// <inheritdoc />
     public async Task<CampaignDetailResponse?> GetCampaignAsync(
         Guid campaignId, 
@@ -592,7 +624,8 @@ public class CampaignService : ICampaignService
                 .Where(m => m.Status == MembershipStatus.Active)
                 .Select(MapToMemberResponse)
                 .ToList() ?? [],
-            SnapshotCount = campaign.Snapshots?.Count ?? 0
+            SnapshotCount = campaign.Snapshots?.Count ?? 0,
+            CampaignTreeDefinition = campaign.CampaignTreeDefinition
         };
     }
     
