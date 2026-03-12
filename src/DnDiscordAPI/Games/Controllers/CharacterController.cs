@@ -46,7 +46,7 @@ namespace DnDiscordAPI.Games.Controllers
                 ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
             if (string.IsNullOrEmpty(discordUserId))
-                return Unauthorized(new { error = "User id missing in token" });
+                throw new UnauthorizedAccessException("User id missing in token");
 
             var characters = await _characterService.GetUserCharactersAsync(discordUserId);
             return Ok(characters);

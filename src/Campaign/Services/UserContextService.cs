@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -11,14 +12,14 @@ namespace DnDiscord.Campaign.Services;
 /// </summary>
 public class UserContextService : IUserContextService
 {
-    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<UserContextService> _logger;
 
     public UserContextService(
-        IHttpContextAccessor httpContextAccessor,
+        IServiceProvider serviceProvider,
         ILogger<UserContextService> logger)
     {
-        _httpContextAccessor = httpContextAccessor;
+        _serviceProvider = serviceProvider;
         _logger = logger;
     }
 
@@ -28,7 +29,10 @@ public class UserContextService : IUserContextService
     /// </summary>
     public Guid GetCurrentUserId()
     {
-        var user = _httpContextAccessor.HttpContext?.User;
+        using var scope = _serviceProvider.CreateScope();
+        var httpContext = scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>();
+
+        var user = httpContext.HttpContext?.User;
 
         if (user == null)
         {

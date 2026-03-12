@@ -47,6 +47,14 @@ public class CreateCampaignRequest
     public CampaignStatus Status { get; set; } = CampaignStatus.Draft;
 }
 
+
+
+public class EditCampaignManager
+{
+    [Required]
+    public string CampaignTreeDefinition { get; set; } = "[]";
+}
+
 /// <summary>
 /// Request to update an existing campaign.
 /// </summary>
@@ -215,6 +223,7 @@ public class CampaignResponse
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime? LastPlayedAt { get; set; }
+    public string? CampaignTreeDefinition { get; set; }
 }
 
 /// <summary>
