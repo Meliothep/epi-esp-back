@@ -19,6 +19,7 @@ public class CharacterLookupAdapter : ICharacterLookupService
         try
         {
             var dto = await _characterService.GetCharacterAsync(characterId);
+            if (dto == null) return null;
             return new CharacterLookupResult
             {
                 Name = dto.Name,
