@@ -17,5 +17,6 @@ namespace Multiplayer.Models
         public ConnectionStatus Status { get; set; } = ConnectionStatus.Connected;
         public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
         public DateTime? DisconnectedAt { get; set; }
+        public Guid? SelectedCharacterId { get; set; }
     }
 }

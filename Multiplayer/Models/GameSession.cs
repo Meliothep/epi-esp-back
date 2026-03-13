@@ -10,7 +10,7 @@ namespace Multiplayer.Models
     public class GameSession
     {
         public string SessionId { get; set; } = string.Empty;
-        public Guid CampaignId { get; set; }
+        public Guid? CampaignId { get; set; }
         public Guid DmUserId { get; set; }
         public List<SessionPlayer> Players { get; set; } = new();
         public SessionState State { get; set; } = SessionState.Lobby;
@@ -18,5 +18,6 @@ namespace Multiplayer.Models
         public DateTime LastActivityAt { get; set; } = DateTime.UtcNow;
         public DateTime? DmDisconnectedAt { get; set; }
         public int MaxPlayers { get; set; } = 6; // 5 joueurs + 1 DM
+        public string? MapId { get; set; }
     }
 }

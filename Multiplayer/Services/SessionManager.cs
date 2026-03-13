@@ -273,12 +273,104 @@ public class SessionManager
     }
 
     /// <summary>
+    /// Créer une room standalone (sans campagne) pour le mode multijoueur libre.
+    /// </summary>
+    public GameSession CreateRoom(Guid hostUserId, string hostUserName, int maxPlayers)
+    {
+        if (maxPlayers < 2 || maxPlayers > 6)
+            throw new ArgumentException("maxPlayers must be between 2 and 6");
+
+        var sessionId = GenerateRoomCode();
+        var session = new GameSession
+        {
+            SessionId = sessionId,
+            CampaignId = null,
+            DmUserId = hostUserId,
+            MaxPlayers = maxPlayers,
+            CreatedAt = DateTime.UtcNow,
+            LastActivityAt = DateTime.UtcNow,
+            State = SessionState.Lobby
+        };
+
+        session.Players.Add(new SessionPlayer
+        {
+            UserId = hostUserId,
+            UserName = hostUserName,
+            Role = PlayerRole.DungeonMaster,
+            Status = ConnectionStatus.Connected,
+            JoinedAt = DateTime.UtcNow
+        });
+
+        if (_sessions.TryAdd(sessionId, session))
+        {
+            _logger.LogInformation("Room {SessionId} created by host {HostUserId} (max {MaxPlayers} players)",
+                sessionId, hostUserId, maxPlayers);
+            return session;
+        }
+
+        throw new InvalidOperationException("Failed to create room");
+    }
+
+    /// <summary>
+    /// Définir le personnage sélectionné par un joueur dans la session.
+    /// </summary>
+    public bool SetPlayerCharacter(string sessionId, Guid userId, Guid? characterId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            return false;
+
+        lock (session.Players)
+        {
+            var player = session.Players.FirstOrDefault(p => p.UserId == userId);
+            if (player == null)
+                return false;
+
+            player.SelectedCharacterId = characterId;
+            session.LastActivityAt = DateTime.UtcNow;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Définir la carte de la session.
+    /// </summary>
+    public void SetSessionMapId(string sessionId, string mapId)
+    {
+        if (_sessions.TryGetValue(sessionId, out var session))
+        {
+            session.MapId = mapId;
+            session.LastActivityAt = DateTime.UtcNow;
+        }
+    }
+
+    /// <summary>
     /// Générer un ID de session unique
     /// </summary>
     /// <returns></returns>
     private string GenerateSessionId()
     {
         return $"session_{Guid.NewGuid():N}";
+    }
+
+    /// <summary>
+    /// Générer un code de room court (XXXX-XXXX).
+    /// </summary>
+    private string GenerateRoomCode()
+    {
+        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // sans I, O, 0, 1 pour éviter l'ambiguïté
+        var random = Random.Shared;
+        var code = new char[9]; // 8 chars + 1 dash
+        for (int i = 0; i < 9; i++)
+        {
+            if (i == 4) { code[i] = '-'; continue; }
+            var idx = i > 4 ? i - 1 : i;
+            code[i] = chars[random.Next(chars.Length)];
+        }
+        var roomCode = new string(code);
+        // Ensure uniqueness
+        if (_sessions.ContainsKey(roomCode))
+            return GenerateRoomCode();
+        return roomCode;
     }
 
     /// <summary>

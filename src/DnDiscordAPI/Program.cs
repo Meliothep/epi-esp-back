@@ -23,7 +23,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHttpClient();
 builder.Services.AddMultiplayerServices();
 
-builder.AddGamesServices();
+builder.AddGamesServices(builder.Configuration);
 builder.AddAuthServices();
 
 // CORS configuration
@@ -157,8 +157,6 @@ builder.Services
     });
 
 builder.Services.AddAuthorization();
-
-builder.AddGamesServices(builder.Configuration);
 
 builder.Services.AddCampaignModule(builder.Configuration);
 

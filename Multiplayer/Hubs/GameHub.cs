@@ -6,6 +6,7 @@ using Multiplayer.Models;
 using Multiplayer.Models.Messages;
 using Multiplayer.Services;
 using System.Security.Claims;
+using static Multiplayer.Define;
 
 namespace Multiplayer.Hubs;
 
@@ -18,12 +19,14 @@ public class GameHub : Hub
     private readonly StateManager _stateManager;
     private readonly IGameActionValidator _validator;
     private readonly IUserContextService _userContextService;
+    private readonly ICharacterLookupService _characterLookup;
 
     /// <summary>
     /// Constructeur du GameHub
     /// </summary>
     public GameHub(ILogger<GameHub> logger, SessionManager sessionManager, MessageSequencer messageSequencer,
-        StateManager stateManager, IGameActionValidator validator, IUserContextService userContextService)
+        StateManager stateManager, IGameActionValidator validator, IUserContextService userContextService,
+        ICharacterLookupService characterLookup)
     {
         _logger = logger;
         _sessionManager = sessionManager;
@@ -31,6 +34,7 @@ public class GameHub : Hub
         _stateManager = stateManager;
         _validator = validator;
         _userContextService = userContextService;
+        _characterLookup = characterLookup;
     }
 
     /// <summary>
@@ -207,6 +211,151 @@ public class GameHub : Hub
     }
 
     /// <summary>
+    /// Créer une room standalone (sans campagne) pour le mode multijoueur libre.
+    /// </summary>
+    public async Task<SessionInfo> CreateRoom(int maxPlayers)
+    {
+        var userId = GetUserId();
+        var userName = GetUserName();
+
+        var session = _sessionManager.CreateRoom(userId, userName, maxPlayers);
+
+        await Groups.AddToGroupAsync(Context.ConnectionId, session.SessionId);
+
+        // Map the connection so we can find the session later
+        _sessionManager.JoinSession(session.SessionId, userId, userName, Context.ConnectionId);
+
+        _logger.LogInformation("Room {SessionId} created by {UserId}", session.SessionId, userId);
+
+        return MapToSessionInfo(session);
+    }
+
+    /// <summary>
+    /// Sélectionner un personnage pour le lobby (avant le lancement de la partie).
+    /// </summary>
+    public async Task SelectCharacter(Guid? characterId)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null)
+            throw new HubException("Not in a session");
+
+        var userId = GetUserId();
+        _sessionManager.SetPlayerCharacter(sessionId, userId, characterId);
+
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null) return;
+
+        // Broadcast updated session info to all players
+        var sessionInfo = MapToSessionInfo(session);
+        await Clients.Group(sessionId).SendAsync("PlayerUpdated", sessionInfo);
+    }
+
+    /// <summary>
+    /// Lancer la partie (host/DM uniquement). Construit les UnitAssignments à partir des personnages sélectionnés.
+    /// </summary>
+    public async Task StartGame(string mapId, string? mapData = null)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null)
+            throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null)
+            throw new HubException("Session not found");
+
+        var userId = GetUserId();
+        if (session.DmUserId != userId)
+            throw new HubException("Only the host can start the game");
+
+        if (session.State != SessionState.Lobby)
+            throw new HubException("Game already started");
+
+        // Set session state
+        session.State = SessionState.InProgress;
+        session.MapId = mapId;
+        session.LastActivityAt = DateTime.UtcNow;
+
+        // Build unit assignments for each player
+        var assignments = new List<UnitAssignment>();
+        foreach (var player in session.Players)
+        {
+            UnitAssignment assignment;
+            if (player.SelectedCharacterId.HasValue)
+            {
+                try
+                {
+                    var character = await _characterLookup.GetCharacterAsync(player.SelectedCharacterId.Value);
+                    if (character != null)
+                    {
+                        assignment = new UnitAssignment
+                        {
+                            UserId = player.UserId,
+                            UnitId = $"player_{player.UserId.ToString("N")[..8]}",
+                            UnitName = character.Name,
+                            CharacterClass = character.CharacterClass,
+                            MaxHp = character.MaxHitPoints,
+                            CurrentHp = character.CurrentHitPoints,
+                            ArmorClass = character.ArmorClass,
+                            Speed = character.Speed,
+                            Initiative = character.Initiative,
+                            AttackDamage = 15,
+                            Defense = character.ArmorClass,
+                            MovementRange = character.Speed / 5,
+                            AttackRange = 1
+                        };
+                    }
+                    else
+                    {
+                        assignment = BuildDefaultAssignment(player);
+                    }
+                }
+                catch
+                {
+                    assignment = BuildDefaultAssignment(player);
+                }
+            }
+            else
+            {
+                assignment = BuildDefaultAssignment(player);
+            }
+
+            assignments.Add(assignment);
+        }
+
+        var payload = new GameStartedPayload
+        {
+            MapId = mapId,
+            MapData = mapData,
+            UnitAssignments = assignments
+        };
+
+        _logger.LogInformation("Game started in session {SessionId} with map {MapId} and {Count} players",
+            sessionId, mapId, assignments.Count);
+
+        await Clients.Group(sessionId).SendAsync("GameStarted", payload);
+    }
+
+    private static UnitAssignment BuildDefaultAssignment(SessionPlayer player)
+    {
+        return new UnitAssignment
+        {
+            UserId = player.UserId,
+            UnitId = $"player_{player.UserId.ToString("N")[..8]}",
+            UnitName = player.UserName ?? "Aventurier",
+            CharacterClass = "Guerrier",
+            MaxHp = 120,
+            CurrentHp = 120,
+            ArmorClass = 15,
+            Speed = 30,
+            Initiative = 12,
+            AttackDamage = 20,
+            Defense = 15,
+            MovementRange = 6,
+            AttackRange = 1
+        };
+    }
+
+    /// <summary>
     /// Ping-Pong pour vérifier la connectivité
     /// </summary>
     /// <returns></returns>
@@ -242,12 +391,14 @@ public class GameHub : Hub
             PlayerCount = session.Players.Count,
             MaxPlayers = session.MaxPlayers,
             State = session.State,
+            MapId = session.MapId,
             Players = session.Players.Select(p => new PlayerInfo
             {
                 UserId = p.UserId,
                 UserName = p.UserName ?? "Inconnu",
                 Role = p.Role,
-                Status = p.Status
+                Status = p.Status,
+                SelectedCharacterId = p.SelectedCharacterId
             }).ToList()
         };
     }
