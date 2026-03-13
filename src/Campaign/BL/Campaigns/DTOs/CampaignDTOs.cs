@@ -231,6 +231,11 @@ public class CampaignResponse
 /// </summary>
 public class CampaignDetailResponse : CampaignResponse
 {
+    /// <summary>
+    /// True when the current user (who requested the detail) is the Dungeon Master of this campaign.
+    /// Allows the frontend to show "Lancer la session" without comparing Discord ID to Guid-derived DM id.
+    /// </summary>
+    public bool IsDungeonMaster { get; set; }
     public bool HasInviteCode { get; set; }
     public DateTime? InviteCodeExpiresAt { get; set; }
     public List<CampaignMemberResponse> Members { get; set; } = [];
