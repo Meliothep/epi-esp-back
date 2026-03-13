@@ -25,6 +25,10 @@ public static class MultiplayerServiceExtensions
             options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
             options.HandshakeTimeout = TimeSpan.FromSeconds(15);
             options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+        })
+        .AddJsonProtocol(options =>
+        {
+            options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
         });
 
         return services;

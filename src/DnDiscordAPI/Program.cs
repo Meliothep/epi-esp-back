@@ -73,15 +73,6 @@ var jwtSecret = jwtSection["SecretKey"]
 var jwtIssuer = jwtSection["Issuer"] ?? "dndiscord-backend";
 var jwtAudience = jwtSection["Audience"] ?? "dndiscord-frontend";
 
-builder.Services.AddSignalR(options =>
-{
-    options.EnableDetailedErrors = true;
-})
-.AddJsonProtocol(options =>
-{
-    options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
-});
-
 builder.Services.AddSingleton<SignalRService>(); // Messages → front via SignalR
 
 builder.Services
