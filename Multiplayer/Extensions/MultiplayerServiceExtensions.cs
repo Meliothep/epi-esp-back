@@ -21,7 +21,7 @@ public static class MultiplayerServiceExtensions
         services.AddSignalR(options =>
         {
             options.EnableDetailedErrors = true;
-            options.MaximumReceiveMessageSize = 10 * 1024; // 10KB limit (Discord iframe constraints)
+            options.MaximumReceiveMessageSize = 64 * 1024; // 64KB limit
             options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
             options.HandshakeTimeout = TimeSpan.FromSeconds(15);
             options.KeepAliveInterval = TimeSpan.FromSeconds(15);
