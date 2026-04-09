@@ -5,6 +5,7 @@ using DnDiscord.Campaign.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -29,9 +30,13 @@ public static class CampaignExtensions
         services.AddDbContext<CampaignDbContext>(options =>
             options.UseNpgsql(
                 configuration.GetConnectionString("DefaultConnection"),
-                b => b.MigrationsAssembly(typeof(CampaignDbContext).Assembly.FullName)));
+                b =>
+                {
+                    b.MigrationsAssembly(typeof(CampaignDbContext).Assembly.FullName);
+                    b.MigrationsHistoryTable("__EFMigrationsHistory_Campaign");
+                }));
 
-        // Services mÈtier
+        // Services mùtier
         services.AddScoped<ICampaignService, CampaignService>();
         services.AddScoped<IUserContextService, UserContextService>();
 
