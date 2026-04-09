@@ -14,6 +14,7 @@ using Microsoft.IdentityModel.Tokens;
 using Multiplayer.Hubs;
 using DnDiscordAPI.Messages.Hubs;
 using DnDiscordAPI.Messages.Services;
+using DnDiscordAPI.PartyChat;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -74,6 +75,7 @@ var jwtIssuer = jwtSection["Issuer"] ?? "dndiscord-backend";
 var jwtAudience = jwtSection["Audience"] ?? "dndiscord-frontend";
 
 builder.Services.AddSingleton<SignalRService>(); // Messages → front via SignalR
+builder.Services.AddSingleton<VoiceSessionRegistry>(); 
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
