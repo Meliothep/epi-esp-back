@@ -106,3 +106,8 @@ secrets.json
 
 # Fake
 .fake
+
+# code-review-graph (strict ignore)
+.code-review-graph/
+.code-review-graphignore
+.code-review-graph*
