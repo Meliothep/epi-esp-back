@@ -98,8 +98,10 @@ public class GameHub : Hub
     /// Créer une nouvelle session de jeu
     /// </summary>
     /// <param name="campaignId"></param>
+    /// <param name="guildId">Optionnel: id de guild Discord (activité).</param>
+    /// <param name="voiceChannelId">Optionnel: id de salon vocal Discord (activité).</param>
     /// <returns></returns>
-    public async Task<SessionInfo> CreateSession(Guid campaignId)
+    public async Task<SessionInfo> CreateSession(Guid campaignId, string? guildId = null, string? voiceChannelId = null)
     {
         var userId = GetUserId();
         var userName = GetUserName();
@@ -111,7 +113,74 @@ public class GameHub : Hub
 
         _logger.LogInformation("Session {SessionId} created by {UserId}", session.SessionId, userId);
 
+        // Le front peut proposer un bouton "Rejoindre" sans saisie de code.
+        await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("SessionStarted", new
+        {
+            sessionId = session.SessionId,
+            campaignId = campaignId,
+            startedByUserId = userId,
+            startedByUserName = userName,
+            timestamp = DateTime.UtcNow
+        });
+
+        // Si on est dans une activité Discord, notifier aussi tous les joueurs connectés à cette activité
+        // (pour permettre l'invitation "sans code" depuis l'activité).
+        if (!string.IsNullOrWhiteSpace(guildId) && !string.IsNullOrWhiteSpace(voiceChannelId))
+        {
+            await Clients.Group(GetActivityGroup(guildId, voiceChannelId)).SendAsync("SessionStarted", new
+            {
+                sessionId = session.SessionId,
+                campaignId = campaignId,
+                startedByUserId = userId,
+                startedByUserName = userName,
+                guildId,
+                voiceChannelId,
+                timestamp = DateTime.UtcNow
+            });
+        }
+
         return MapToSessionInfo(session);
+    }
+
+    /// <summary>
+    /// S'abonner aux notifications d'une campagne (ex: "SessionStarted").
+    /// À appeler depuis une page de campagne / lobby.
+    /// </summary>
+    public async Task SubscribeCampaign(Guid campaignId)
+    {
+        await Groups.AddToGroupAsync(Context.ConnectionId, GetCampaignGroup(campaignId));
+        _logger.LogDebug("Connection {ConnectionId} subscribed to campaign {CampaignId}",
+            Context.ConnectionId, campaignId);
+    }
+
+    /// <summary>
+    /// Se désabonner des notifications d'une campagne.
+    /// </summary>
+    public async Task UnsubscribeCampaign(Guid campaignId)
+    {
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, GetCampaignGroup(campaignId));
+        _logger.LogDebug("Connection {ConnectionId} unsubscribed from campaign {CampaignId}",
+            Context.ConnectionId, campaignId);
+    }
+
+    /// <summary>
+    /// S'abonner aux notifications "activité Discord" (participants connectés au même salon vocal).
+    /// </summary>
+    public async Task SubscribeActivity(string guildId, string voiceChannelId)
+    {
+        await Groups.AddToGroupAsync(Context.ConnectionId, GetActivityGroup(guildId, voiceChannelId));
+        _logger.LogDebug("Connection {ConnectionId} subscribed to activity {GuildId}/{VoiceChannelId}",
+            Context.ConnectionId, guildId, voiceChannelId);
+    }
+
+    /// <summary>
+    /// Se désabonner des notifications "activité Discord".
+    /// </summary>
+    public async Task UnsubscribeActivity(string guildId, string voiceChannelId)
+    {
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, GetActivityGroup(guildId, voiceChannelId));
+        _logger.LogDebug("Connection {ConnectionId} unsubscribed from activity {GuildId}/{VoiceChannelId}",
+            Context.ConnectionId, guildId, voiceChannelId);
     }
 
     /// <summary>
@@ -381,6 +450,10 @@ public class GameHub : Hub
                ?? Context.User?.FindFirst(ClaimTypes.Name)?.Value
                ?? "Unknown";
     }
+
+    private static string GetCampaignGroup(Guid campaignId) => $"campaign_{campaignId:N}";
+    private static string GetActivityGroup(string guildId, string voiceChannelId)
+        => $"activity_{guildId}_{voiceChannelId}";
 
     private SessionInfo MapToSessionInfo(GameSession session)
     {
