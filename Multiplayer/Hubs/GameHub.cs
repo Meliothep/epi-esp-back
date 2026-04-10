@@ -117,6 +117,8 @@ public class GameHub : Hub
         // Rejoindre le groupe SignalR
         await Groups.AddToGroupAsync(Context.ConnectionId, session.SessionId);
 
+        _sessionManager.JoinSession(session.SessionId, userId, userName, Context.ConnectionId);
+
         _logger.LogInformation("Session {SessionId} created by {UserId}", session.SessionId, userId);
 
         await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("SessionStarted", new
