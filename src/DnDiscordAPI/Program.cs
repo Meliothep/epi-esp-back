@@ -23,9 +23,10 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHttpClient();
 builder.Services.AddMultiplayerServices();
 
-builder.AddGamesServices(builder.Configuration);
 builder.AddAuthServices();
+builder.AddGamesModule();
 builder.AddCampaignModule();
+
 
 // CORS configuration
 var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() 
@@ -158,8 +159,6 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
-builder.Services.AddCampaignModule(builder.Configuration);
-
 builder.Services.AddHttpContextAccessor();
 
 var app = builder.Build();
@@ -201,6 +200,7 @@ app.Use(async (context, next) =>
 // Configure modular middleware
 app.UseCors("AllowFrontend");
 
+app.UseGamesModule();
 app.UseCampaignModule();
 app.MapDefaultEndpoints();
 app.UseHttpsRedirection();
