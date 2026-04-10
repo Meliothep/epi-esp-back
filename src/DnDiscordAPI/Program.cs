@@ -77,6 +77,13 @@ var jwtAudience = jwtSection["Audience"] ?? "dndiscord-frontend";
 builder.Services.AddSingleton<SignalRService>(); // Messages → front via SignalR
 builder.Services.AddSingleton<VoiceSessionRegistry>(); 
 
+builder.Services.AddHttpClient("discord-bot", http =>
+{
+    http.BaseAddress = new Uri("https://discord.com/api/v10/");
+    http.Timeout = TimeSpan.FromSeconds(5);
+});
+builder.Services.AddSingleton<DnDiscordAPI.Discord.IDiscordBotNotifier, DnDiscordAPI.Discord.DiscordBotNotifier>();
+
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>

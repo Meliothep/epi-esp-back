@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Multiplayer.Hubs;
 using Multiplayer.Services;
+using System.Security.Claims;
+using DnDiscordAPI.Discord;
 
 namespace DnDiscordAPI.PartyChat;
 
@@ -18,6 +20,7 @@ public class PartyChatController : ControllerBase
     private readonly SessionManager _sessionManager;
     private readonly IHubContext<GameHub> _gameHub;
     private readonly DnDiscord.Campaign.Services.IUserContextService _userContext;
+    private readonly IDiscordBotNotifier _discordBotNotifier;
 
     public PartyChatController(
         IConfiguration configuration,
@@ -25,7 +28,8 @@ public class PartyChatController : ControllerBase
         VoiceSessionRegistry registry,
         SessionManager sessionManager,
         IHubContext<GameHub> gameHub,
-        DnDiscord.Campaign.Services.IUserContextService userContext)
+        DnDiscord.Campaign.Services.IUserContextService userContext,
+        IDiscordBotNotifier discordBotNotifier)
     {
         _configuration = configuration;
         _logger = logger;
@@ -33,6 +37,7 @@ public class PartyChatController : ControllerBase
         _sessionManager = sessionManager;
         _gameHub = gameHub;
         _userContext = userContext;
+        _discordBotNotifier = discordBotNotifier;
     }
 
     public record BindRequest(string SessionId, string GuildId, string VoiceChannelId);
@@ -43,7 +48,7 @@ public class PartyChatController : ControllerBase
     /// </summary>
     [Authorize]
     [HttpPost("bind")]
-    public IActionResult Bind([FromBody] BindRequest request)
+    public async Task<IActionResult> Bind([FromBody] BindRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.SessionId) ||
             string.IsNullOrWhiteSpace(request.GuildId) ||
@@ -67,6 +72,18 @@ public class PartyChatController : ControllerBase
         var binding = _registry.Bind(request.GuildId, request.VoiceChannelId, request.SessionId);
         _logger.LogInformation("[PartyChat] Bound guild {GuildId} voice {VoiceChannelId} to session {SessionId}",
             request.GuildId, request.VoiceChannelId, request.SessionId);
+
+        var createdBy =
+            User.FindFirst("username")?.Value
+            ?? User.FindFirst("name")?.Value
+            ?? User.FindFirst(ClaimTypes.Name)?.Value
+            ?? "Quelqu’un";
+        await _discordBotNotifier.TryAnnounceSessionCreatedAsync(
+            voiceChannelId: request.VoiceChannelId,
+            sessionId: request.SessionId,
+            createdBy: createdBy,
+            ct: ct);
+
         return Ok(binding);
     }
 
