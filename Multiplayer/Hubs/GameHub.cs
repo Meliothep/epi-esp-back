@@ -101,6 +101,12 @@ public class GameHub : Hub
     /// <param name="guildId">Optionnel: id de guild Discord (activité).</param>
     /// <param name="voiceChannelId">Optionnel: id de salon vocal Discord (activité).</param>
     /// <returns></returns>
+    /// <remarks>
+    /// Two distinct events are emitted to avoid double-notification for users subscribed to both groups:
+    /// - <c>SessionStarted</c>: sent to the campaign group only, with no Discord context in the payload.
+    /// - <c>ActivitySessionStarted</c>: sent to the activity group only (when guildId and voiceChannelId
+    ///   are provided), payload includes guildId and voiceChannelId.
+    /// </remarks>
     public async Task<SessionInfo> CreateSession(Guid campaignId, string? guildId = null, string? voiceChannelId = null)
     {
         var userId = GetUserId();
@@ -113,7 +119,6 @@ public class GameHub : Hub
 
         _logger.LogInformation("Session {SessionId} created by {UserId}", session.SessionId, userId);
 
-        // Le front peut proposer un bouton "Rejoindre" sans saisie de code.
         await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("SessionStarted", new
         {
             sessionId = session.SessionId,
@@ -123,20 +128,19 @@ public class GameHub : Hub
             timestamp = DateTime.UtcNow
         });
 
-        // Si on est dans une activité Discord, notifier aussi tous les joueurs connectés à cette activité
-        // (pour permettre l'invitation "sans code" depuis l'activité).
         if (!string.IsNullOrWhiteSpace(guildId) && !string.IsNullOrWhiteSpace(voiceChannelId))
         {
-            await Clients.Group(GetActivityGroup(guildId, voiceChannelId)).SendAsync("SessionStarted", new
-            {
-                sessionId = session.SessionId,
-                campaignId = campaignId,
-                startedByUserId = userId,
-                startedByUserName = userName,
-                guildId,
-                voiceChannelId,
-                timestamp = DateTime.UtcNow
-            });
+            await Clients.Group(GetActivityGroup(guildId, voiceChannelId))
+                .SendAsync("ActivitySessionStarted", new
+                {
+                    sessionId = session.SessionId,
+                    campaignId = campaignId,
+                    startedByUserId = userId,
+                    startedByUserName = userName,
+                    guildId,
+                    voiceChannelId,
+                    timestamp = DateTime.UtcNow
+                });
         }
 
         return MapToSessionInfo(session);
