@@ -111,3 +111,8 @@ secrets.json
 .code-review-graph/
 .code-review-graphignore
 .code-review-graph*
+
+# graphify
+graphify-out/
+.graphify_*
+.graphifyignore
