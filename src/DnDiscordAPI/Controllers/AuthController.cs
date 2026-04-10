@@ -15,17 +15,18 @@ public class AuthController : ControllerBase
     private readonly ILogger<AuthController> _logger;
     private readonly IConfiguration _configuration;
 
-    // Simple in-memory user store (replace with database in production)
-    private static Dictionary<string, User> Users = new();
+    private readonly IUserStore _userStore;
 
     public AuthController(
         IDiscordAuthService discordAuthService,
         ITokenService tokenService,
+        IUserStore userStore,
         ILogger<AuthController> logger,
         IConfiguration configuration)
     {
         _discordAuthService = discordAuthService;
         _tokenService = tokenService;
+        _userStore = userStore;
         _logger = logger;
         _configuration = configuration;
     }
@@ -37,22 +38,42 @@ public class AuthController : ControllerBase
     [HttpGet("discord/url")]
     public ActionResult<DiscordAuthUrlResponse> GetDiscordAuthUrl()
     {
+        var authUrl = GetDiscordOAuthUrl();
+        if (string.IsNullOrEmpty(authUrl))
+            return StatusCode(500, new { error = "Discord OAuth is not configured" });
+        return Ok(new DiscordAuthUrlResponse { Url = authUrl });
+    }
+
+    /// <summary>
+    /// Redirect (302) to Discord OAuth. Use this for popup/login from contexts where
+    /// connect-src CSP blocks fetch (e.g. Discord embed). Optional state = return URL when popup is blocked.
+    /// </summary>
+    [AllowAnonymous]
+    [HttpGet("discord/redirect")]
+    public IActionResult DiscordRedirect([FromQuery] string? state = null)
+    {
+        var authUrl = GetDiscordOAuthUrl(state);
+        if (string.IsNullOrEmpty(authUrl))
+            return StatusCode(500, new { error = "Discord OAuth is not configured" });
+        return Redirect(authUrl);
+    }
+
+    private string? GetDiscordOAuthUrl(string? state = null)
+    {
         var clientId = _configuration["Discord:ClientId"];
         var redirectUri = _configuration["Discord:RedirectUri"];
-        
         if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(redirectUri))
         {
             _logger.LogError("Discord OAuth configuration is missing");
-            return StatusCode(500, new { error = "Discord OAuth is not configured" });
+            return null;
         }
-
         var scope = "identify email guilds";
         var encodedRedirectUri = Uri.EscapeDataString(redirectUri);
         var encodedScope = Uri.EscapeDataString(scope);
-        
-        var authUrl = $"https://discord.com/api/oauth2/authorize?client_id={clientId}&redirect_uri={encodedRedirectUri}&response_type=code&scope={encodedScope}";
-        
-        return Ok(new DiscordAuthUrlResponse { Url = authUrl });
+        var url = $"https://discord.com/api/oauth2/authorize?client_id={clientId}&redirect_uri={encodedRedirectUri}&response_type=code&scope={encodedScope}";
+        if (!string.IsNullOrEmpty(state))
+            url += "&state=" + Uri.EscapeDataString(state);
+        return url;
     }
 
     /// <summary>
@@ -96,7 +117,7 @@ public class AuthController : ControllerBase
             _logger.LogInformation($"[OAUTH] Successfully fetched Discord user: {discordUser.Username} ({discordUser.Id})");
 
             // Create or update user in our system
-            var user = GetOrCreateUser(discordUser);
+            var user = _userStore.GetOrCreateUser(discordUser);
 
             // Generate JWT token for frontend (including avatar for session restoration)
             var token = _tokenService.GenerateToken(user.Id, user.Username, user.Email, user.Avatar);
@@ -134,8 +155,9 @@ public class AuthController : ControllerBase
         if (string.IsNullOrEmpty(userId))
             return Unauthorized(new { error = "Invalid token" });
 
-        // Try to get user from in-memory store
-        if (Users.TryGetValue(userId, out var user))
+        // Try to get user from store (reconstruct if not found after restart)
+        var user = _userStore.TryGetUser(userId);
+        if (user != null)
         {
             return Ok(user);
         }
@@ -148,7 +170,7 @@ public class AuthController : ControllerBase
         if (string.IsNullOrEmpty(username))
             return Unauthorized(new { error = "Invalid token claims" });
 
-        // Reconstruct user from token claims and store in memory
+        // Reconstruct user from token claims
         var reconstructedUser = new User
         {
             Id = userId,
@@ -159,9 +181,7 @@ public class AuthController : ControllerBase
             CreatedAt = DateTime.UtcNow,
         };
 
-        Users[userId] = reconstructedUser;
-        _logger.LogInformation($"Reconstructed user from JWT claims: {username}");
-
+        _logger.LogInformation("Reconstructed user from JWT claims: {Username}", username);
         return Ok(reconstructedUser);
     }
 
@@ -195,23 +215,15 @@ public class AuthController : ControllerBase
         var username = request.Username ?? "TestUser";
         var email = request.Email ?? $"{username.ToLower()}@test.local";
 
-        _logger.LogInformation($"[DEV] Generating test token for user: {username} (ID: {userId})");
+        _logger.LogInformation("[DEV] Generating test token for user: {Username} (ID: {UserId})", username, userId);
 
-        // Create or get user in memory store
-        if (!Users.TryGetValue(userId, out var user))
+        var user = _userStore.GetOrCreateUser(new DiscordUserData
         {
-            user = new User
-            {
-                Id = userId,
-                Username = username,
-                Email = email,
-                DiscordId = userId,
-                Avatar = null,
-                CreatedAt = DateTime.UtcNow,
-            };
-            Users[user.Id] = user;
-            _logger.LogInformation($"Created dev user: {user.Username}");
-        }
+            Id = userId,
+            Username = username,
+            Email = email,
+            Avatar = null,
+        });
 
         // Generate JWT token
         var token = _tokenService.GenerateToken(user.Id, user.Username, user.Email);
@@ -223,34 +235,4 @@ public class AuthController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Helper method to get or create user from Discord data
-    /// </summary>
-    private User GetOrCreateUser(DiscordUserData discordUser)
-    {
-        if (Users.TryGetValue(discordUser.Id, out var existingUser))
-        {
-            // Update existing user
-            existingUser.Username = discordUser.Username;
-            existingUser.Email = discordUser.Email ?? existingUser.Email;
-            existingUser.Avatar = discordUser.Avatar;
-            return existingUser;
-        }
-
-        // Create new user
-        var newUser = new User
-        {
-            Id = discordUser.Id,
-            Username = discordUser.Username,
-            Email = discordUser.Email ?? $"{discordUser.Username}@discord.local",
-            DiscordId = discordUser.Id,
-            Avatar = discordUser.Avatar,
-            CreatedAt = DateTime.UtcNow,
-        };
-
-        Users[newUser.Id] = newUser;
-        _logger.LogInformation($"Created new user: {newUser.Username}");
-
-        return newUser;
-    }
 }

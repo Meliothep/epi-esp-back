@@ -2,6 +2,8 @@ using DnDiscordAPI.Games.Character.Repositories;
 using DnDiscordAPI.Games.Character.Services;
 using DnDiscordAPI.Games.Database;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Multiplayer.Services;
 
 namespace DnDiscordAPI.Games
 {
@@ -25,6 +27,7 @@ namespace DnDiscordAPI.Games
             // Enregistrement des services
             builder.Services.AddScoped<ICharacterService, CharacterService>();
             builder.Services.AddScoped<ICharacterRepository, CharacterRepository>();
+            builder.Services.AddScoped<ICharacterLookupService, CharacterLookupAdapter>();
 
             return builder;
         }

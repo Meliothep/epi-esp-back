@@ -6,7 +6,7 @@ namespace DnDiscordAPI.Auth.Services;
 public interface IDiscordAuthService
 {
     Task<DiscordUserData?> GetUserDataAsync(string accessToken);
-    Task<string?> ExchangeCodeForTokenAsync(string code);
+    Task<string?> ExchangeCodeForTokenAsync(string code, string? redirectUri = null);
 }
 
 public class DiscordAuthService : IDiscordAuthService
@@ -26,11 +26,12 @@ public class DiscordAuthService : IDiscordAuthService
         _redirectUri = configuration["Discord:RedirectUri"] ?? throw new InvalidOperationException("Discord:RedirectUri not configured");
     }
 
-    public async Task<string?> ExchangeCodeForTokenAsync(string code)
+    public async Task<string?> ExchangeCodeForTokenAsync(string code, string? redirectUri = null)
     {
         try
         {
-            _logger.LogInformation("[DISCORD_AUTH] Starting code exchange...");
+            var effectiveRedirectUri = !string.IsNullOrEmpty(redirectUri) ? redirectUri : _redirectUri;
+            _logger.LogInformation("[DISCORD_AUTH] Starting code exchange (redirect_uri: {RedirectUri})...", effectiveRedirectUri);
 
             var request = new HttpRequestMessage(HttpMethod.Post, "https://discord.com/api/oauth2/token");
             
@@ -40,7 +41,7 @@ public class DiscordAuthService : IDiscordAuthService
                 { "client_secret", _clientSecret },
                 { "grant_type", "authorization_code" },
                 { "code", code },
-                { "redirect_uri", _redirectUri },
+                { "redirect_uri", effectiveRedirectUri },
                 { "scope", "identify email guilds" },
             });
 
