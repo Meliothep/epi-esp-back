@@ -201,18 +201,21 @@ public class GameHub : Hub
 
         if (result.Success && result.Session != null)
         {
+            var resolvedSessionId = result.Session.SessionId;
+
             // Rejoindre le groupe SignalR
-            await Groups.AddToGroupAsync(Context.ConnectionId, sessionId);
+            await Groups.AddToGroupAsync(Context.ConnectionId, resolvedSessionId);
 
             // Notifier les autres joueurs
-            await Clients.OthersInGroup(sessionId).SendAsync("PlayerJoined", new
+            await Clients.OthersInGroup(resolvedSessionId).SendAsync("PlayerJoined", new
             {
                 userId,
                 userName,
                 timestamp = DateTime.UtcNow
             });
 
-            _logger.LogInformation("User {UserId} joined session {SessionId}", userId, sessionId);
+            _logger.LogInformation("User {UserId} joined session {SessionId} (requested: {Requested})",
+                userId, resolvedSessionId, sessionId);
         }
 
         return result;
@@ -464,6 +467,7 @@ public class GameHub : Hub
         return new SessionInfo
         {
             SessionId = session.SessionId,
+            JoinCode = session.JoinCode,
             CampaignId = session.CampaignId,
             PlayerCount = session.Players.Count,
             MaxPlayers = session.MaxPlayers,

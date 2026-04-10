@@ -10,6 +10,10 @@ namespace Multiplayer.Models
     public class SessionInfo
     {
         public string SessionId { get; set; } = string.Empty;
+        /// <summary>
+        /// Code court partageable pour rejoindre la session (XXXX-XXXX).
+        /// </summary>
+        public string JoinCode { get; set; } = string.Empty;
         public Guid? CampaignId { get; set; }
         public string CampaignName { get; set; } = string.Empty;
         public int PlayerCount { get; set; }

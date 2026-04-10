@@ -9,6 +9,7 @@ public class SessionManager
 {
     private readonly ConcurrentDictionary<string, GameSession> _sessions = new();
     private readonly ConcurrentDictionary<string, string> _connectionToSession = new(); // ConnectionId -> SessionId
+    private readonly ConcurrentDictionary<string, string> _joinCodeToSession = new(); // JoinCode -> SessionId
     private readonly ILogger<SessionManager> _logger;
     private readonly StateManager _stateManager;
     private readonly MessageSequencer _messageSequencer;
@@ -31,9 +32,11 @@ public class SessionManager
     public GameSession CreateSession(Guid campaignId, Guid dmUserId, string dmUserName)
     {
         var sessionId = GenerateSessionId();
+        var joinCode = GenerateRoomCode();
         var session = new GameSession
         {
             SessionId = sessionId,
+            JoinCode = joinCode,
             CampaignId = campaignId,
             DmUserId = dmUserId,
             CreatedAt = DateTime.UtcNow,
@@ -53,6 +56,7 @@ public class SessionManager
 
         if (_sessions.TryAdd(sessionId, session))
         {
+            _joinCodeToSession.TryAdd(joinCode, sessionId);
             _logger.LogInformation("Session {SessionId} created for campaign {CampaignId} by DM {DmUserId}",
                 sessionId, campaignId, dmUserId);
             return session;
@@ -71,7 +75,15 @@ public class SessionManager
     /// <returns></returns>
     public JoinResult JoinSession(string sessionId, Guid userId, string userName, string connectionId)
     {
-        if (!_sessions.TryGetValue(sessionId, out var session))
+        // Allow joining by joinCode (XXXX-XXXX) or by internal sessionId.
+        var resolvedSessionId = sessionId;
+        if (!_sessions.ContainsKey(resolvedSessionId) &&
+            _joinCodeToSession.TryGetValue(sessionId, out var mappedSessionId))
+        {
+            resolvedSessionId = mappedSessionId;
+        }
+
+        if (!_sessions.TryGetValue(resolvedSessionId, out var session))
         {
             return JoinResult.Fail("Session not found");
         }
@@ -88,10 +100,10 @@ public class SessionManager
                 if (existingPlayer.Role == PlayerRole.DungeonMaster)
                     session.DmDisconnectedAt = null;
 
-                _connectionToSession.TryAdd(connectionId, sessionId);
+                _connectionToSession.TryAdd(connectionId, resolvedSessionId);
 
                 _logger.LogInformation("User {UserId} reconnected to session {SessionId}",
-                    userId, sessionId);
+                    userId, resolvedSessionId);
 
                 return JoinResult.Ok(session, existingPlayer);
             }
@@ -116,10 +128,10 @@ public class SessionManager
             session.Players.Add(newPlayer);
             session.LastActivityAt = DateTime.UtcNow;
 
-            _connectionToSession.TryAdd(connectionId, sessionId);
+            _connectionToSession.TryAdd(connectionId, resolvedSessionId);
 
             _logger.LogInformation("User {UserId} ({UserName}) joined session {SessionId}",
-                userId, userName, sessionId);
+                userId, userName, resolvedSessionId);
 
             return JoinResult.Ok(session, newPlayer);
         }
@@ -157,6 +169,8 @@ public class SessionManager
                 if (session.Players.Count == 0)
                 {
                     _sessions.TryRemove(sessionId, out _);
+                    if (!string.IsNullOrWhiteSpace(session.JoinCode))
+                        _joinCodeToSession.TryRemove(session.JoinCode, out _);
                     _stateManager.RemoveSnapshot(sessionId);
                     _messageSequencer.ResetSequence(sessionId);
                     _logger.LogInformation("Session {SessionId} removed (no players left)", sessionId);
@@ -233,6 +247,8 @@ public class SessionManager
             if (session.Players.Count == 0)
             {
                 _sessions.TryRemove(sessionId, out _);
+                if (!string.IsNullOrWhiteSpace(session.JoinCode))
+                    _joinCodeToSession.TryRemove(session.JoinCode, out _);
                 _stateManager.RemoveSnapshot(sessionId);
                 _messageSequencer.ResetSequence(sessionId);
                 _logger.LogInformation("Session {SessionId} removed (no players left after kick)", sessionId);
@@ -285,9 +301,11 @@ public class SessionManager
             throw new ArgumentException("maxPlayers must be between 2 and 6");
 
         var sessionId = GenerateRoomCode();
+        var joinCode = sessionId; // For rooms, SessionId is already a short joinable code.
         var session = new GameSession
         {
             SessionId = sessionId,
+            JoinCode = joinCode,
             CampaignId = null,
             DmUserId = hostUserId,
             MaxPlayers = maxPlayers,
@@ -307,6 +325,7 @@ public class SessionManager
 
         if (_sessions.TryAdd(sessionId, session))
         {
+            _joinCodeToSession.TryAdd(joinCode, sessionId);
             _logger.LogInformation("Room {SessionId} created by host {HostUserId} (max {MaxPlayers} players)",
                 sessionId, hostUserId, maxPlayers);
             return session;
@@ -392,6 +411,8 @@ public class SessionManager
         foreach (var session in staleSessions)
         {
             _sessions.TryRemove(session.SessionId, out _);
+            if (!string.IsNullOrWhiteSpace(session.JoinCode))
+                _joinCodeToSession.TryRemove(session.JoinCode, out _);
             _stateManager.RemoveSnapshot(session.SessionId);
             _messageSequencer.ResetSequence(session.SessionId);
             foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
@@ -422,6 +443,8 @@ public class SessionManager
         foreach (var session in toRemove)
         {
             _sessions.TryRemove(session.SessionId, out _);
+            if (!string.IsNullOrWhiteSpace(session.JoinCode))
+                _joinCodeToSession.TryRemove(session.JoinCode, out _);
             _stateManager.RemoveSnapshot(session.SessionId);
             _messageSequencer.ResetSequence(session.SessionId);
             foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
