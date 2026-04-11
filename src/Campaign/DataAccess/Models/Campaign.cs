@@ -83,6 +83,11 @@ public class Campaign
     public DateTime? DeletedAt { get; set; }
     
     /// <summary>
+    /// Serialized draw2d canvas tree definition (nodes + connections).
+    /// </summary>
+    public string? CampaignTreeDefinition { get; set; }
+
+    /// <summary>
     /// Navigation property for snapshots.
     /// </summary>
     public virtual ICollection<CampaignSnapshot> Snapshots { get; set; } = [];

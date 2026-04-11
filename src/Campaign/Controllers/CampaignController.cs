@@ -278,6 +278,50 @@ public class CampaignController : ControllerBase
     
     #endregion
     
+    #region Campaign Tree
+
+    /// <summary>
+    /// Updates the campaign canvas tree definition (nodes + connections).
+    /// </summary>
+    [HttpPut("{id:guid}/manager")]
+    [ProducesResponseType(typeof(CampaignDetailResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateCampaignTree(
+        [FromRoute] Guid id,
+        [FromBody] UpdateCampaignManagerRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            var userId = _userContextService.GetCurrentUserId();
+            var campaign = await _campaignService.UpdateCampaignTreeAsync(id, request.CampaignTreeDefinition, userId, ct);
+
+            if (campaign == null)
+            {
+                return NotFound(new ProblemDetails
+                {
+                    Title = "Campaign Not Found",
+                    Detail = $"Campaign {id} not found",
+                    Status = StatusCodes.Status404NotFound
+                });
+            }
+
+            return Ok(campaign);
+        }
+        catch (CampaignException ex)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Update Failed",
+                Detail = ex.Message,
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+    }
+
+    #endregion
+
     #region Members
     
     /// <summary>

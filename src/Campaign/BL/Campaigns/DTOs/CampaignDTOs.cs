@@ -231,6 +231,15 @@ public class CampaignDetailResponse : CampaignResponse
     public DateTime? InviteCodeExpiresAt { get; set; }
     public List<CampaignMemberResponse> Members { get; set; } = [];
     public int SnapshotCount { get; set; }
+    public string? CampaignTreeDefinition { get; set; }
+}
+
+/// <summary>
+/// Request to update the campaign tree (canvas nodes + connections).
+/// </summary>
+public class UpdateCampaignManagerRequest
+{
+    public string? CampaignTreeDefinition { get; set; }
 }
 
 /// <summary>

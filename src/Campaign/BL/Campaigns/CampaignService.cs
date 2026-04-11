@@ -30,6 +30,9 @@ public interface ICampaignService
     Task<CampaignMemberResponse?> UpdateMemberAsync(Guid campaignId, Guid memberId, UpdateMemberRequest request, Guid userId, CancellationToken ct = default);
     Task<bool> RemoveMemberAsync(Guid campaignId, Guid memberId, Guid userId, CancellationToken ct = default);
     Task<bool> LeaveCampaignAsync(Guid campaignId, Guid userId, CancellationToken ct = default);
+
+    // Campaign tree
+    Task<CampaignDetailResponse?> UpdateCampaignTreeAsync(Guid campaignId, string? treeDefinition, Guid userId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -537,6 +540,42 @@ public class CampaignService : ICampaignService
     
     #endregion
     
+    #region Campaign Tree
+
+    /// <inheritdoc />
+    public async Task<CampaignDetailResponse?> UpdateCampaignTreeAsync(
+        Guid campaignId,
+        string? treeDefinition,
+        Guid userId,
+        CancellationToken ct = default)
+    {
+        var campaign = await _dbContext.Campaigns
+            .Include(c => c.Members)
+            .Include(c => c.Snapshots)
+            .FirstOrDefaultAsync(c => c.Id == campaignId, ct);
+
+        if (campaign == null) return null;
+
+        if (!_validator.CanModify(campaign, userId))
+        {
+            _logger.LogWarning("User {UserId} attempted to update tree of campaign {CampaignId} without permission", userId, campaignId);
+            throw new CampaignException("You don't have permission to modify this campaign");
+        }
+
+        campaign.CampaignTreeDefinition = treeDefinition;
+        campaign.UpdatedAt = DateTime.UtcNow;
+
+        await _dbContext.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Updated campaign tree for campaign {CampaignId}", campaignId);
+
+        var response = MapToDetailResponse(campaign);
+        response.IsDungeonMaster = campaign.DungeonMasterId == userId;
+        return response;
+    }
+
+    #endregion
+
     #region Private Methods
     
     private static string GenerateUniqueCode()
@@ -592,7 +631,8 @@ public class CampaignService : ICampaignService
                 .Where(m => m.Status == MembershipStatus.Active)
                 .Select(MapToMemberResponse)
                 .ToList() ?? [],
-            SnapshotCount = campaign.Snapshots?.Count ?? 0
+            SnapshotCount = campaign.Snapshots?.Count ?? 0,
+            CampaignTreeDefinition = campaign.CampaignTreeDefinition
         };
     }
     

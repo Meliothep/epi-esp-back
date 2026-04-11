@@ -67,6 +67,9 @@ public class CampaignDbContext : DbContext
             entity.Property(c => c.ImageUrl)
                 .HasMaxLength(2000);
 
+            entity.Property(c => c.CampaignTreeDefinition)
+                .HasColumnType("json");
+
             entity.Property(c => c.MaxPlayers)
                 .HasDefaultValue(6);
 
