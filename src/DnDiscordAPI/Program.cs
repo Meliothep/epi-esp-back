@@ -6,7 +6,6 @@ using DnDiscord.Campaign;
 using DnDiscordAPI.Auth;
 using DnDiscordAPI.Auth.Services;
 using DnDiscordAPI.Games;
-using DnDiscordAPI.Games.Database;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -162,32 +161,6 @@ builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 
 var app = builder.Build();
-
-using (var scope = app.Services.CreateScope())
-{
-    var dbContext = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
-    try
-    {
-        app.Logger.LogInformation("Applying database migrations...");
-        dbContext.Database.Migrate();
-        app.Logger.LogInformation("Database migrations applied successfully.");
-    }
-    catch (InvalidOperationException ex) when (ex.Message.Contains("PendingModelChangesWarning"))
-    {
-        if (app.Environment.IsProduction())
-        {
-            throw;
-        }
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogError(ex, "An error occurred while applying database migrations.");
-        if (app.Environment.IsProduction())
-        {
-            throw;
-        }
-    }
-}
 
 app.Use(async (context, next) =>
 {
