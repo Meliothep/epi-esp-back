@@ -1,4 +1,5 @@
 using DnDiscord.Campaign.BL.Campaigns;
+using DnDiscord.Campaign.BL.Sessions;
 using DnDiscord.Campaign.BL.Snapshots;
 using DnDiscord.Campaign.DataAccess;
 using DnDiscord.Campaign.Services;
@@ -78,6 +79,7 @@ public static class CampaignExtensions
         // Scoped services (per-request with DbContext dependency)
         builder.Services.AddScoped<ICampaignService, CampaignService>();
         builder.Services.AddScoped<IUserContextService, UserContextService>();
+        builder.Services.AddScoped<ICampaignSessionService, CampaignSessionService>();
 
         return builder;
     }

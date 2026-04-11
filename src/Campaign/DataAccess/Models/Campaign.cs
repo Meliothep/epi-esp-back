@@ -96,4 +96,9 @@ public class Campaign
     /// Navigation property for campaign members.
     /// </summary>
     public virtual ICollection<CampaignMember> Members { get; set; } = [];
+
+    /// <summary>
+    /// Navigation property for game sessions.
+    /// </summary>
+    public ICollection<CampaignGameSession> GameSessions { get; set; } = [];
 }
