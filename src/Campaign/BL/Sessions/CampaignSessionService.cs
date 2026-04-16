@@ -15,6 +15,10 @@ public interface ICampaignSessionService
     Task<GameSessionResponse?> CompleteSessionAsync(Guid sessionId, Guid userId, CancellationToken ct = default);
 }
 
+// TODO: Add campaign membership/DM verification in all session operations.
+// Currently userId is passed but only used for logging -- any authenticated user
+// can manipulate any campaign's sessions. [Authorize] on the controller prevents
+// unauthenticated access, but per-campaign authorization is missing.
 public class CampaignSessionService : ICampaignSessionService
 {
     private readonly CampaignDbContext _db;
