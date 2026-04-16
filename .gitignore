@@ -22,8 +22,10 @@ bld/
 # Rider
 .idea/
 
-# Cursor
+# AI assistants
 .cursor/
+.cursorrules
+CLAUDE.md
 
 # VS Code
 .vscode/
