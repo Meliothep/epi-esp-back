@@ -3,7 +3,6 @@ using DnDiscord.Campaign.BL.Campaigns.DTOs;
 using DnDiscord.Campaign.DataAccess;
 using DnDiscord.Campaign.DataAccess.Models;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using CampaignEntity = DnDiscord.Campaign.DataAccess.Models.Campaign;
 
@@ -16,7 +15,6 @@ public interface ICampaignService
 {
     // Campaign CRUD
     Task<CampaignDetailResponse> CreateCampaignAsync(CreateCampaignRequest request, Guid userId, CancellationToken ct = default);
-    Task<CampaignDetailResponse> UpdateCampaignManagerAsync(EditCampaignManager request, Guid CampaignId, Guid userId, CancellationToken ct = default);
     Task<CampaignDetailResponse?> GetCampaignAsync(Guid campaignId, Guid userId, CancellationToken ct = default);
     Task<CampaignListResponse> ListCampaignsAsync(CampaignFilterRequest filter, Guid userId, CancellationToken ct = default);
     Task<CampaignDetailResponse?> UpdateCampaignAsync(Guid campaignId, UpdateCampaignRequest request, Guid userId, CancellationToken ct = default);
@@ -32,6 +30,9 @@ public interface ICampaignService
     Task<CampaignMemberResponse?> UpdateMemberAsync(Guid campaignId, Guid memberId, UpdateMemberRequest request, Guid userId, CancellationToken ct = default);
     Task<bool> RemoveMemberAsync(Guid campaignId, Guid memberId, Guid userId, CancellationToken ct = default);
     Task<bool> LeaveCampaignAsync(Guid campaignId, Guid userId, CancellationToken ct = default);
+
+    // Campaign tree
+    Task<CampaignDetailResponse?> UpdateCampaignTreeAsync(Guid campaignId, string? treeDefinition, Guid userId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -41,63 +42,34 @@ public class CampaignService : ICampaignService
 {
     private readonly CampaignDbContext _dbContext;
     private readonly ICampaignValidator _validator;
-    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<CampaignService> _logger;
     
     public CampaignService(
         CampaignDbContext dbContext,
         ICampaignValidator validator,
-        IServiceProvider serviceProvider,
         ILogger<CampaignService> logger)
     {
-        _serviceProvider = serviceProvider;
         _dbContext = dbContext;
         _validator = validator;
         _logger = logger;
     }
-
+    
     #region Campaign CRUD
-
+    
     /// <inheritdoc />
-    public async Task<CampaignDetailResponse> UpdateCampaignManagerAsync(
-    EditCampaignManager request,
-    Guid campaignId,
-    Guid userId, CancellationToken ct)
-    {
-        _logger.LogInformation("Updating campaign {CampaignId}", campaignId);
-
-        var campaign = await _dbContext.Campaigns.FindAsync(new object?[] { campaignId }, cancellationToken: ct)
-            ?? throw new CampaignException($"Campaign {campaignId} not found");
-
-        if (campaign.DungeonMasterId != userId)
-            throw new UnauthorizedAccessException("You are not the owner of this campaign");
-
-        var validation = _validator.ValidateCampaignTreeDefinition(request);
-        if (!validation.IsValid)
-            throw new CampaignException($"Validation failed: {string.Join(", ", validation.Errors.Select(e => e.Message))}");
-
-        campaign.CampaignTreeDefinition = request.CampaignTreeDefinition;
-        campaign.UpdatedAt = DateTime.UtcNow;
-
-        await _dbContext.SaveChangesAsync(ct);
-        _logger.LogInformation("Updated campaign {CampaignId}", campaignId);
-
-        return MapToDetailResponse(campaign);
-    }
-
     public async Task<CampaignDetailResponse> CreateCampaignAsync(
-        CreateCampaignRequest request,
-        Guid userId,
+        CreateCampaignRequest request, 
+        Guid userId, 
         CancellationToken ct = default)
     {
         _logger.LogInformation("Creating campaign '{Name}' for user {UserId}", request.Name, userId);
-
+        
         var validation = _validator.ValidateCreate(request);
         if (!validation.IsValid)
         {
             throw new CampaignException($"Validation failed: {string.Join(", ", validation.Errors.Select(e => e.Message))}");
         }
-
+        
         var campaign = new CampaignEntity
         {
             Id = Guid.NewGuid(),
@@ -109,18 +81,17 @@ public class CampaignService : ICampaignService
             MaxPlayers = request.MaxPlayers,
             IsPublic = request.IsPublic,
             CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            CampaignTreeDefinition = null
+            UpdatedAt = DateTime.UtcNow
         };
-
+        
         _dbContext.Campaigns.Add(campaign);
         await _dbContext.SaveChangesAsync(ct);
-
+        
         _logger.LogInformation("Created campaign {CampaignId} '{Name}'", campaign.Id, campaign.Name);
-
+        
         return MapToDetailResponse(campaign);
     }
-
+    
     /// <inheritdoc />
     public async Task<CampaignDetailResponse?> GetCampaignAsync(
         Guid campaignId, 
@@ -569,18 +540,62 @@ public class CampaignService : ICampaignService
     
     #endregion
     
+    #region Campaign Tree
+
+    /// <inheritdoc />
+    public async Task<CampaignDetailResponse?> UpdateCampaignTreeAsync(
+        Guid campaignId,
+        string? treeDefinition,
+        Guid userId,
+        CancellationToken ct = default)
+    {
+        var campaign = await _dbContext.Campaigns
+            .Include(c => c.Members)
+            .Include(c => c.Snapshots)
+            .FirstOrDefaultAsync(c => c.Id == campaignId, ct);
+
+        if (campaign == null) return null;
+
+        if (!_validator.CanModify(campaign, userId))
+        {
+            _logger.LogWarning("User {UserId} attempted to update tree of campaign {CampaignId} without permission", userId, campaignId);
+            throw new CampaignException("You don't have permission to modify this campaign");
+        }
+
+        if (treeDefinition != null)
+        {
+            try { System.Text.Json.JsonDocument.Parse(treeDefinition); }
+            catch (System.Text.Json.JsonException)
+            { throw new CampaignException("Tree definition must be valid JSON"); }
+        }
+
+        campaign.CampaignTreeDefinition = treeDefinition;
+        campaign.UpdatedAt = DateTime.UtcNow;
+
+        await _dbContext.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Updated campaign tree for campaign {CampaignId}", campaignId);
+
+        var response = MapToDetailResponse(campaign);
+        response.IsDungeonMaster = campaign.DungeonMasterId == userId;
+        return response;
+    }
+
+    #endregion
+
     #region Private Methods
     
     private static string GenerateUniqueCode()
     {
-        var bytes = new byte[6];
+        var bytes = new byte[12]; // larger buffer to guarantee 8+ usable chars
         using var rng = RandomNumberGenerator.Create();
         rng.GetBytes(bytes);
-        return Convert.ToBase64String(bytes)
+        var code = Convert.ToBase64String(bytes)
             .Replace("+", "")
             .Replace("/", "")
             .Replace("=", "")
-            .ToUpperInvariant()[..8];
+            .ToUpperInvariant();
+        return code[..8];
     }
     
     private static CampaignResponse MapToResponse(CampaignEntity campaign)

@@ -1,15 +1,14 @@
 using DnDiscord.Campaign.BL.Campaigns;
+using DnDiscord.Campaign.BL.Sessions;
 using DnDiscord.Campaign.BL.Snapshots;
 using DnDiscord.Campaign.DataAccess;
 using DnDiscord.Campaign.Services;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 
 namespace DnDiscord.Campaign;
 
@@ -23,30 +22,83 @@ public static class CampaignExtensions
     /// </summary>
     /// <param name="builder">The host application builder.</param>
     /// <returns>The builder for chaining.</returns>
-    public static IServiceCollection AddCampaignModule(this IServiceCollection services,
-        IConfiguration configuration)
+    public static IHostApplicationBuilder AddCampaignModule(this IHostApplicationBuilder builder)
     {
-        // DbContext
-        services.AddDbContext<CampaignDbContext>(options =>
-            options.UseNpgsql(
-                configuration.GetConnectionString("DefaultConnection"),
-                b =>
-                {
-                    b.MigrationsAssembly(typeof(CampaignDbContext).Assembly.FullName);
-                    b.MigrationsHistoryTable("__EFMigrationsHistory_Campaign");
-                }));
-
-        // Services mùtier
-        services.AddScoped<ICampaignService, CampaignService>();
-        services.AddScoped<IUserContextService, UserContextService>();
-
-        // Validation
-        services.AddScoped<ICampaignValidator, CampaignValidator>();
-
-
-        return services;
+        // Register DbContext
+        builder.AddCampaignDbContext();
+        
+        // Register Campaign services
+        builder.AddCampaignServices();
+        
+        // Register Snapshot services
+        builder.AddSnapshotServices();
+        
+        return builder;
     }
-  
+    
+    /// <summary>
+    /// Adds the Campaign DbContext with PostgreSQL.
+    /// </summary>
+    private static IHostApplicationBuilder AddCampaignDbContext(this IHostApplicationBuilder builder)
+    {
+        var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+        
+        builder.Services.AddDbContext<CampaignDbContext>(options =>
+        {
+            options.UseNpgsql(connectionString, npgsqlOptions =>
+            {
+                npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory_Campaign");
+                npgsqlOptions.EnableRetryOnFailure(
+                    maxRetryCount: 3,
+                    maxRetryDelay: TimeSpan.FromSeconds(10),
+                    errorCodesToAdd: null);
+            });
+            
+            // Enable detailed errors in development
+            if (builder.Environment.IsDevelopment())
+            {
+                options.EnableDetailedErrors();
+                options.EnableSensitiveDataLogging();
+            }
+        });
+        
+        return builder;
+    }
+    
+    /// <summary>
+    /// Adds Campaign-related services.
+    /// </summary>
+    private static IHostApplicationBuilder AddCampaignServices(this IHostApplicationBuilder builder)
+    {
+        // HttpContextAccessor for user context
+        builder.Services.AddHttpContextAccessor();
+
+        // Singleton services (stateless validators)
+        builder.Services.AddSingleton<ICampaignValidator, CampaignValidator>();
+
+        // Scoped services (per-request with DbContext dependency)
+        builder.Services.AddScoped<ICampaignService, CampaignService>();
+        builder.Services.AddScoped<IUserContextService, UserContextService>();
+        builder.Services.AddScoped<ICampaignSessionService, CampaignSessionService>();
+
+        return builder;
+    }
+    
+    /// <summary>
+    /// Adds Snapshot-related services.
+    /// </summary>
+    private static IHostApplicationBuilder AddSnapshotServices(this IHostApplicationBuilder builder)
+    {
+        // Singleton services (stateless utilities)
+        builder.Services.AddSingleton<ISnapshotSerializer, SnapshotSerializer>();
+        builder.Services.AddSingleton<ISnapshotValidator, SnapshotValidator>();
+        
+        // Scoped services (per-request with DbContext dependency)
+        builder.Services.AddScoped<ISnapshotService, SnapshotService>();
+        
+        return builder;
+    }
+    
     /// <summary>
     /// Configures Campaign module endpoints and middleware.
     /// </summary>
@@ -55,34 +107,19 @@ public static class CampaignExtensions
     public static WebApplication UseCampaignModule(this WebApplication app)
     {
         // Apply pending migrations (always, for Docker setup)
-        using (var scope = app.Services.CreateScope())
+        using var scope = app.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CampaignDbContext>();
+        try
         {
-            var dbContext = scope.ServiceProvider.GetRequiredService<CampaignDbContext>();
-
-            try
-            {
-                app.Logger.LogInformation("Applying database migrations...");
-                dbContext.Database.Migrate();
-                app.Logger.LogInformation("Database migrations applied successfully.");
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("PendingModelChangesWarning"))
-            {
-                if (app.Environment.IsProduction())
-                {
-                    throw;
-                }
-            }
-            catch (Exception ex)
-            {
-                app.Logger.LogError(ex, "An error occurred while applying database migrations.");
-                if (app.Environment.IsProduction())
-                {
-                    throw;
-                }
-            }
+            dbContext.Database.Migrate();
         }
+        catch (Exception ex)
+        {
+            // Log but don't crash - migrations might fail in some scenarios
+            Console.WriteLine($"Migration warning: {ex.Message}");
+        }
+
         return app;
-        
     }
 }
 

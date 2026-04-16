@@ -47,14 +47,6 @@ public class CreateCampaignRequest
     public CampaignStatus Status { get; set; } = CampaignStatus.Draft;
 }
 
-
-
-public class EditCampaignManager
-{
-    [Required]
-    public string CampaignTreeDefinition { get; set; } = "[]";
-}
-
 /// <summary>
 /// Request to update an existing campaign.
 /// </summary>
@@ -223,7 +215,6 @@ public class CampaignResponse
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime? LastPlayedAt { get; set; }
-    public string? CampaignTreeDefinition { get; set; }
 }
 
 /// <summary>
@@ -240,6 +231,15 @@ public class CampaignDetailResponse : CampaignResponse
     public DateTime? InviteCodeExpiresAt { get; set; }
     public List<CampaignMemberResponse> Members { get; set; } = [];
     public int SnapshotCount { get; set; }
+    public string? CampaignTreeDefinition { get; set; }
+}
+
+/// <summary>
+/// Request to update the campaign tree (canvas nodes + connections).
+/// </summary>
+public class UpdateCampaignManagerRequest
+{
+    public string? CampaignTreeDefinition { get; set; }
 }
 
 /// <summary>

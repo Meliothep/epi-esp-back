@@ -66,12 +66,7 @@ public class Campaign
     /// Unique invite code for private campaigns.
     /// </summary>
     public string? InviteCode { get; set; }
-
-    /// <summary>
-    /// Unique invite code for private campaigns.
-    /// </summary>
-    public string? CampaignTreeDefinition { get; set; }
-
+    
     /// <summary>
     /// When the invite code expires (null = never).
     /// </summary>
@@ -88,6 +83,11 @@ public class Campaign
     public DateTime? DeletedAt { get; set; }
     
     /// <summary>
+    /// Serialized draw2d canvas tree definition (nodes + connections).
+    /// </summary>
+    public string? CampaignTreeDefinition { get; set; }
+
+    /// <summary>
     /// Navigation property for snapshots.
     /// </summary>
     public virtual ICollection<CampaignSnapshot> Snapshots { get; set; } = [];
@@ -96,4 +96,9 @@ public class Campaign
     /// Navigation property for campaign members.
     /// </summary>
     public virtual ICollection<CampaignMember> Members { get; set; } = [];
+
+    /// <summary>
+    /// Navigation property for game sessions.
+    /// </summary>
+    public ICollection<CampaignGameSession> GameSessions { get; set; } = [];
 }
