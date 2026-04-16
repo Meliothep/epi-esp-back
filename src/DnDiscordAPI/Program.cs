@@ -192,3 +192,6 @@ app.MapHealthChecks("/api/health", new HealthCheckOptions
 });
 
 app.Run();
+
+// Expose entry point for WebApplicationFactory in integration tests
+public partial class DnDiscordAPIProgram { }

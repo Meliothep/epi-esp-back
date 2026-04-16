@@ -562,6 +562,13 @@ public class CampaignService : ICampaignService
             throw new CampaignException("You don't have permission to modify this campaign");
         }
 
+        if (treeDefinition != null)
+        {
+            try { System.Text.Json.JsonDocument.Parse(treeDefinition); }
+            catch (System.Text.Json.JsonException)
+            { throw new CampaignException("Tree definition must be valid JSON"); }
+        }
+
         campaign.CampaignTreeDefinition = treeDefinition;
         campaign.UpdatedAt = DateTime.UtcNow;
 
@@ -580,14 +587,15 @@ public class CampaignService : ICampaignService
     
     private static string GenerateUniqueCode()
     {
-        var bytes = new byte[6];
+        var bytes = new byte[12]; // larger buffer to guarantee 8+ usable chars
         using var rng = RandomNumberGenerator.Create();
         rng.GetBytes(bytes);
-        return Convert.ToBase64String(bytes)
+        var code = Convert.ToBase64String(bytes)
             .Replace("+", "")
             .Replace("/", "")
             .Replace("=", "")
-            .ToUpperInvariant()[..8];
+            .ToUpperInvariant();
+        return code[..8];
     }
     
     private static CampaignResponse MapToResponse(CampaignEntity campaign)
