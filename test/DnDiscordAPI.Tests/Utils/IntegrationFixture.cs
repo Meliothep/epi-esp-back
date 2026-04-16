@@ -1,11 +1,14 @@
 
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using DnDiscord.Campaign.DataAccess;
+using DnDiscordAPI.Games.Database;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.Configuration;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Testcontainers.PostgreSql;
@@ -39,17 +42,20 @@ public abstract class IntegrationFixture<TEntryPoint> : IAsyncLifetime where TEn
         factory = new WebApplicationFactory<TEntryPoint>()
             .WithWebHostBuilder(builder =>
             {
-                builder.ConfigureAppConfiguration((ctx, config) =>
-                {
-                    config.AddInMemoryCollection(new Dictionary<string, string?>
-                    {
-                        ["ConnectionStrings:DefaultConnection"] = connectionString,
-                        ["ConnectionStrings:gamesdb"] = connectionString,
-                    });
-                });
+                builder.UseSetting("ConnectionStrings:DefaultConnection", connectionString);
+                builder.UseSetting("ConnectionStrings:gamesdb", connectionString);
 
                 builder.ConfigureTestServices(services =>
                 {
+                    // Replace DbContext registrations to ensure Testcontainer connection
+                    services.RemoveAll<DbContextOptions<CampaignDbContext>>();
+                    services.RemoveAll<DbContextOptions<GamesDbContext>>();
+                    services.AddDbContext<CampaignDbContext>(options =>
+                        options.UseNpgsql(connectionString, npgsql =>
+                            npgsql.MigrationsHistoryTable("__EFMigrationsHistory_Campaign")));
+                    services.AddDbContext<GamesDbContext>(options =>
+                        options.UseNpgsql(connectionString));
+
                     services.AddAuthentication("Test")
                         .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("Test", _ => { });
 
