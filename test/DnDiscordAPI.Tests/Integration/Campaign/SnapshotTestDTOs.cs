@@ -13,7 +13,7 @@ public record SnapshotTestResponse(
     string? Description,
     Guid CreatedBy,
     DateTime CreatedAt,
-    string Status,
+    int Status,
     long SizeBytes,
     string SizeFormatted,
     SnapshotContentSummaryTest? ContentSummary
