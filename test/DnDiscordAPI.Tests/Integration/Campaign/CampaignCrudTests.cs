@@ -1,8 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using DnDiscordAPI.Tests.Integration;
-using Microsoft.AspNetCore.Mvc.Testing;
-
 namespace DnDiscordAPI.Tests.Integration.Campaign;
 
 /// <summary>
@@ -11,13 +9,11 @@ namespace DnDiscordAPI.Tests.Integration.Campaign;
 [Collection("DnDiscord Integration collection")]
 public sealed class CampaignCrudTests
 {
-    private readonly WebApplicationFactory<DnDiscordAPIProgram> _factory;
     private readonly HttpClient _client;
 
     public CampaignCrudTests(DnDiscordIntegrationFixture fixture)
     {
-        _factory = fixture.factory!;
-        _client = _factory.CreateClient();
+        _client = fixture.CreateAuthenticatedClient();
     }
 
     [Fact]
@@ -121,7 +117,7 @@ public record CampaignTestResponse(
     string Name,
     string? Description,
     Guid DungeonMasterId,
-    string Status,
+    int Status,
     string? ImageUrl,
     int MaxPlayers,
     bool IsPublic,

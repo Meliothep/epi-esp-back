@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using DnDiscordAPI.Tests.Integration;
-using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace DnDiscordAPI.Tests.Integration.Campaign;
 
@@ -11,13 +10,11 @@ namespace DnDiscordAPI.Tests.Integration.Campaign;
 [Collection("DnDiscord Integration collection")]
 public sealed class SnapshotValidationTests
 {
-    private readonly WebApplicationFactory<DnDiscordAPIProgram> _factory;
     private readonly HttpClient _client;
 
     public SnapshotValidationTests(DnDiscordIntegrationFixture fixture)
     {
-        _factory = fixture.factory!;
-        _client = _factory.CreateClient();
+        _client = fixture.CreateAuthenticatedClient();
     }
 
     [Fact]
