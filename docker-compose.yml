@@ -30,6 +30,11 @@ services:
       - "5433:5432"
     networks:
       - dndiscord-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U DnDiscord -d DnDiscordDB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   dndiscordservice:
     image: dndiscordservice
@@ -48,16 +53,18 @@ services:
       - Jwt__Issuer=${JWT_ISSUER:-dndiscord-backend}
       - Jwt__Audience=${JWT_AUDIENCE:-dndiscord-frontend}
       - Jwt__ExpirationMinutes=${JWT_EXPIRATION_MINUTES:-10080}
-      - Discord__ClientId=${DISCORD_CLIENT_ID:-DISCORD_CLIENT_ID}
-      - Discord__ClientSecret=${DISCORD_CLIENT_SECRET:-DISCORD_CLIENT_SECRET}
+      - Discord__ClientId=${DISCORD_CLIENT_ID:-1433484276535398450}
+      - Discord__ClientSecret=${DISCORD_CLIENT_SECRET:-n57avmFcBB3YEHiZfbDl2vGWDmkt2COm}
       - Discord__RedirectUri=${DISCORD_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      - Cors__Origins__0=${CORS_ORIGIN:-http://localhost:3000}
     volumes:
       - ~/.vsdbg:/remote_debugger:rw
     networks:
       - dndiscord-network
       - seq-net
     depends_on:
-      - dndiscordPostgres
+      dndiscordPostgres:
+        condition: service_healthy
 
 networks:
   dndiscord-network:

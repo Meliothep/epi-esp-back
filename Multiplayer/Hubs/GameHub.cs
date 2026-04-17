@@ -486,6 +486,111 @@ public class GameHub : Hub
         };
     }
 
+    #region [== DM Tools ==]
+
+    /// <summary>
+    /// DM force-moves any token on the board. Broadcasts DmTokenMoved to all players.
+    /// </summary>
+    public async Task DmMoveToken(DmMoveTokenPayload payload)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null)
+            throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null)
+            throw new HubException("Session not found");
+
+        var userId = GetUserId();
+        if (session.DmUserId != userId)
+            throw new HubException("Only the DM can force-move tokens");
+
+        _logger.LogInformation("DM {UserId} force-moved unit {UnitId} to ({X},{Y}) in session {SessionId}",
+            userId, payload.UnitId, payload.Target.X, payload.Target.Y, sessionId);
+
+        var message = _messageSequencer.CreateMessage(sessionId, "DmTokenMoved", payload);
+        await Clients.Group(sessionId).SendAsync("DmTokenMoved", message);
+    }
+
+    /// <summary>
+    /// DM rolls a hidden dice visible only to themselves. Not broadcast to players.
+    /// </summary>
+    public async Task<DmHiddenRollPayload> DmHiddenRoll(int diceType = 20, int modifier = 0, string? label = null)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null)
+            throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null)
+            throw new HubException("Session not found");
+
+        var userId = GetUserId();
+        if (session.DmUserId != userId)
+            throw new HubException("Only the DM can do hidden rolls");
+
+        var rng = new Random();
+        var result = rng.Next(1, diceType + 1);
+
+        var payload = new DmHiddenRollPayload
+        {
+            DiceType = diceType,
+            Result = result,
+            Modifier = modifier,
+            Total = result + modifier,
+            Label = label,
+            Timestamp = DateTime.UtcNow
+        };
+
+        _logger.LogInformation("DM {UserId} hidden roll: d{DiceType}={Result}+{Modifier}={Total} in session {SessionId}",
+            userId, diceType, result, modifier, result + modifier, sessionId);
+
+        // Only send back to the DM caller — hidden from players
+        await Clients.Caller.SendAsync("DmHiddenRollResult", payload);
+        return payload;
+    }
+
+    /// <summary>
+    /// DM grants an item to a player character. Broadcasts to all so UI can update.
+    /// </summary>
+    public async Task DmGrantItem(DmGrantItemPayload payload)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null)
+            throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null)
+            throw new HubException("Session not found");
+
+        var userId = GetUserId();
+        if (session.DmUserId != userId)
+            throw new HubException("Only the DM can grant items");
+
+        var targetPlayer = session.Players.FirstOrDefault(p => p.UserId == payload.TargetUserId);
+        if (targetPlayer == null)
+            throw new HubException("Target player not found in session");
+
+        var grantedPayload = new ItemGrantedPayload
+        {
+            TargetUserId = payload.TargetUserId,
+            TargetUserName = targetPlayer.UserName ?? "Inconnu",
+            ItemId = payload.ItemId,
+            ItemName = payload.ItemName,
+            Quantity = payload.Quantity,
+            Description = payload.Description,
+            Timestamp = DateTime.UtcNow
+        };
+
+        _logger.LogInformation("DM {UserId} granted {Quantity}x {ItemName} to {TargetUserId} in session {SessionId}",
+            userId, payload.Quantity, payload.ItemName, payload.TargetUserId, sessionId);
+
+        var message = _messageSequencer.CreateMessage(sessionId, "ItemGranted", grantedPayload);
+        await Clients.Group(sessionId).SendAsync("ItemGranted", message);
+    }
+
+    #endregion
+
     #region [== Messages de jeu ==]
 
     /// <summary>
