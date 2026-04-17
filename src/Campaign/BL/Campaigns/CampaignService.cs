@@ -89,7 +89,10 @@ public class CampaignService : ICampaignService
         
         _logger.LogInformation("Created campaign {CampaignId} '{Name}'", campaign.Id, campaign.Name);
         
-        return MapToDetailResponse(campaign);
+        var response = MapToDetailResponse(campaign);
+        // Creator is always the DM.
+        response.IsDungeonMaster = true;
+        return response;
     }
     
     /// <inheritdoc />
@@ -236,7 +239,9 @@ public class CampaignService : ICampaignService
         
         _logger.LogInformation("Updated campaign {CampaignId}", campaignId);
         
-        return MapToDetailResponse(campaign);
+        var response = MapToDetailResponse(campaign);
+        response.IsDungeonMaster = campaign.DungeonMasterId == userId;
+        return response;
     }
     
     /// <inheritdoc />
