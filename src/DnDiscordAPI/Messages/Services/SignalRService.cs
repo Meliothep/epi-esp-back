@@ -1,15 +1,55 @@
 ﻿using Microsoft.AspNetCore.SignalR;
 using DnDiscordAPI.Messages.Hubs;
+using DnDiscordAPI.Games.Character.DTOs;
+using DnDiscordAPI.Games.Inventory.DTOs;
+using Multiplayer.Hubs;
 
 namespace DnDiscordAPI.Messages.Services
 {
     public class SignalRService
     {
         private readonly IHubContext<MessageHub> _hubContext;
+        private readonly IHubContext<GameHub> _gameHubContext;
 
-        public SignalRService(IHubContext<MessageHub> hubContext)
+        public SignalRService(IHubContext<MessageHub> hubContext, IHubContext<GameHub> gameHubContext)
         {
             _hubContext = hubContext;
+            _gameHubContext = gameHubContext;
+        }
+
+        /// <summary>
+        /// Diffuse un changement d'inventaire à tous les clients connectés via GameHub
+        /// (le hub utilisé par le front pour le temps réel).
+        /// </summary>
+        public async Task SendInventoryChangedAsync(InventoryChangedEvent evt)
+        {
+            try
+            {
+                Console.WriteLine($"[SignalRService] InventoryChanged {evt.Action} character={evt.CharacterId} item={evt.Entry?.Item?.Name}");
+                await _gameHubContext.Clients.All.SendAsync("InventoryChanged", evt);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SignalRService] Erreur InventoryChanged: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Diffuse un changement de bourse à tous les clients connectés via GameHub.
+        /// </summary>
+        public async Task SendWalletChangedAsync(Guid characterId, WalletDto wallet)
+        {
+            try
+            {
+                Console.WriteLine($"[SignalRService] WalletChanged character={characterId}");
+                await _gameHubContext.Clients.All.SendAsync("WalletChanged", new { characterId, wallet });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SignalRService] Erreur WalletChanged: {ex.Message}");
+                throw;
+            }
         }
 
         public async Task SendMessageToFront(MessageDto message)

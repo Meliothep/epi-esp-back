@@ -2,6 +2,7 @@
 using DnDiscordAPI.Games.Character.DTOs;
 using DnDiscordAPI.Games.Character.Models;
 using DnDiscordAPI.Games.Database;
+using DnDiscordAPI.Messages.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace DnDiscordAPI.Games.Character.Services
@@ -13,22 +14,27 @@ namespace DnDiscordAPI.Games.Character.Services
         Task<List<CharacterDto>> GetUserCharactersAsync(string discordUserId);
         Task<CharacterDto> UpdateHitPointsAsync(Guid characterId, int newHitPoints);
         Task<CharacterDto> LevelUpAsync(Guid characterId);
+        Task<WalletDto> GetWalletAsync(Guid characterId);
+        Task<WalletDto> ModifyWalletAsync(Guid characterId, ModifyWalletRequest request);
     }
 
 
     public class CharacterService : ICharacterService
     {
-        private readonly GamesDbContext _context; 
-        private readonly IMapper _mapper; 
+        private readonly GamesDbContext _context;
+        private readonly IMapper _mapper;
+        private readonly SignalRService _signalR;
         private readonly ILogger<CharacterService> _logger;
 
         public CharacterService(
-            GamesDbContext context, 
+            GamesDbContext context,
             IMapper mapper,
+            SignalRService signalR,
             ILogger<CharacterService> logger)
         {
             _context = context;
             _mapper = mapper;
+            _signalR = signalR;
             _logger = logger;
         }
 
@@ -53,6 +59,7 @@ namespace DnDiscordAPI.Games.Character.Services
                 Race = request.Race,
                 Level = 1,
                 Abilities = finalAbilities,
+                Wallet = new Wallet(),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -179,6 +186,47 @@ namespace DnDiscordAPI.Games.Character.Services
             };
 
             return Random.Shared.Next(1, dieSize + 1);
+        }
+
+        public async Task<WalletDto> GetWalletAsync(Guid characterId)
+        {
+            var character = await _context.Characters.FindAsync(characterId)
+                ?? throw new KeyNotFoundException($"Character {characterId} not found");
+
+            return _mapper.Map<WalletDto>(character.Wallet ?? new Wallet());
+        }
+
+        public async Task<WalletDto> ModifyWalletAsync(Guid characterId, ModifyWalletRequest request)
+        {
+            var character = await _context.Characters.FindAsync(characterId)
+                ?? throw new KeyNotFoundException($"Character {characterId} not found");
+
+            character.Wallet ??= new Wallet();
+
+            // Appliquer les deltas et clamper à 0
+            character.Wallet.CopperPieces = Math.Max(0, character.Wallet.CopperPieces + request.CopperPieces);
+            character.Wallet.SilverPieces = Math.Max(0, character.Wallet.SilverPieces + request.SilverPieces);
+            character.Wallet.ElectrumPieces = Math.Max(0, character.Wallet.ElectrumPieces + request.ElectrumPieces);
+            character.Wallet.GoldPieces = Math.Max(0, character.Wallet.GoldPieces + request.GoldPieces);
+            character.Wallet.PlatinumPieces = Math.Max(0, character.Wallet.PlatinumPieces + request.PlatinumPieces);
+            character.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            var dto = _mapper.Map<WalletDto>(character.Wallet);
+
+            await _signalR.SendWalletChangedAsync(characterId, dto);
+
+            _logger.LogInformation(
+                "Wallet modified for character {Character}: CP={CP} PA={PA} PE={PE} PO={PO} PP={PP}",
+                characterId,
+                character.Wallet.CopperPieces,
+                character.Wallet.SilverPieces,
+                character.Wallet.ElectrumPieces,
+                character.Wallet.GoldPieces,
+                character.Wallet.PlatinumPieces);
+
+            return dto;
         }
     }
 }
