@@ -3,11 +3,9 @@ using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Multiplayer.Extensions;
 using DnDiscord.Campaign;
-using DnDiscord.Campaign.DataAccess;
 using DnDiscordAPI.Auth;
 using DnDiscordAPI.Auth.Services;
 using DnDiscordAPI.Games;
-using DnDiscordAPI.Games.Database;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -24,8 +22,10 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHttpClient();
 builder.Services.AddMultiplayerServices();
 
-builder.AddGamesServices(builder.Configuration);
 builder.AddAuthServices();
+builder.AddGamesModule();
+builder.AddCampaignModule();
+
 
 // CORS configuration
 var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() 
@@ -158,13 +158,9 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
-builder.Services.AddCampaignModule(builder.Configuration);
-
 builder.Services.AddHttpContextAccessor();
 
 var app = builder.Build();
-
-app.UseHttpsRedirection();
 
 app.Use(async (context, next) =>
 {
@@ -179,8 +175,8 @@ app.UseCors("AllowFrontend");
 
 app.UseGamesModule();
 app.UseCampaignModule();
-
 app.MapDefaultEndpoints();
+app.UseHttpsRedirection();
 
 // Auth pipeline
 app.UseAuthentication();
@@ -196,3 +192,6 @@ app.MapHealthChecks("/api/health", new HealthCheckOptions
 });
 
 app.Run();
+
+// Expose entry point for WebApplicationFactory in integration tests
+public partial class DnDiscordAPIProgram { }

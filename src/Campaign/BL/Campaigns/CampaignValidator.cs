@@ -19,8 +19,7 @@ public interface ICampaignValidator
     /// Validates an update campaign request.
     /// </summary>
     ValidationResult ValidateUpdate(UpdateCampaignRequest request);
-    ValidationResult ValidateCampaignTreeDefinition(EditCampaignManager request);
-
+    
     /// <summary>
     /// Checks if the user can modify the campaign.
     /// </summary>
@@ -187,28 +186,7 @@ public class CampaignValidator : ICampaignValidator
         
         return errors.Count == 0 ? ValidationResult.Success() : ValidationResult.Failure(errors.ToArray());
     }
-
-    public ValidationResult ValidateCampaignTreeDefinition(EditCampaignManager request)
-    {
-        var errors = new List<ValidationError>();
-
-        // Name validation (if provided)
-        if (request.CampaignTreeDefinition != null)
-        {
-            if (string.IsNullOrWhiteSpace(request.CampaignTreeDefinition))
-            {
-                errors.Add(new ValidationError("REQUIRED", "Campaign TreeDefinition cannot be empty", "Name"));
-            }
-        }
-
-        if (errors.Count > 0)
-        {
-            _logger.LogWarning("Campaign update validation failed with {ErrorCount} errors", errors.Count);
-        }
-
-        return errors.Count == 0 ? ValidationResult.Success() : ValidationResult.Failure(errors.ToArray());
-    }
-
+    
     /// <inheritdoc />
     public bool CanModify(CampaignEntity campaign, Guid userId)
     {

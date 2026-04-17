@@ -21,9 +21,12 @@ public class DiscordAuthService : IDiscordAuthService
     {
         _httpClient = httpClient;
         _logger = logger;
-        _clientId = configuration["Discord:ClientId"] ?? throw new InvalidOperationException("Discord:ClientId not configured");
-        _clientSecret = configuration["Discord:ClientSecret"] ?? throw new InvalidOperationException("Discord:ClientSecret not configured");
-        _redirectUri = configuration["Discord:RedirectUri"] ?? throw new InvalidOperationException("Discord:RedirectUri not configured");
+        _clientId = configuration["Discord:ClientId"];
+        _clientSecret = configuration["Discord:ClientSecret"];
+        _redirectUri = configuration["Discord:RedirectUri"];
+        if (string.IsNullOrEmpty(_clientId)) throw new InvalidOperationException("Discord:ClientId is not configured");
+        if (string.IsNullOrEmpty(_clientSecret)) throw new InvalidOperationException("Discord:ClientSecret is not configured");
+        if (string.IsNullOrEmpty(_redirectUri)) throw new InvalidOperationException("Discord:RedirectUri is not configured");
     }
 
     public async Task<string?> ExchangeCodeForTokenAsync(string code, string? redirectUri = null)
@@ -42,7 +45,6 @@ public class DiscordAuthService : IDiscordAuthService
                 { "grant_type", "authorization_code" },
                 { "code", code },
                 { "redirect_uri", effectiveRedirectUri },
-                { "scope", "identify email guilds" },
             });
 
             request.Content = content;
@@ -55,8 +57,8 @@ public class DiscordAuthService : IDiscordAuthService
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                _logger.LogError($"[DISCORD_AUTH] Token exchange failed: {response.StatusCode} - {errorContent}");
-                return null;
+                _logger.LogError("[DISCORD_AUTH] Token exchange failed: {StatusCode} - {Error}", response.StatusCode, errorContent);
+                throw new InvalidOperationException($"Discord token exchange failed ({response.StatusCode}): {errorContent}");
             }
 
             var responseString = await response.Content.ReadAsStringAsync();

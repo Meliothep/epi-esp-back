@@ -27,6 +27,16 @@ public class CampaignDbContext : DbContext
     /// </summary>
     public DbSet<CampaignMember> CampaignMembers => Set<CampaignMember>();
 
+    /// <summary>
+    /// Campaign game sessions table.
+    /// </summary>
+    public DbSet<CampaignGameSession> GameSessions => Set<CampaignGameSession>();
+
+    /// <summary>
+    /// Session history entries table.
+    /// </summary>
+    public DbSet<SessionHistoryEntry> SessionHistoryEntries => Set<SessionHistoryEntry>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -34,6 +44,8 @@ public class CampaignDbContext : DbContext
         ConfigureCampaign(modelBuilder);
         ConfigureCampaignSnapshot(modelBuilder);
         ConfigureCampaignMember(modelBuilder);
+        ConfigureCampaignGameSession(modelBuilder);
+        ConfigureSessionHistoryEntry(modelBuilder);
     }
 
     private static void ConfigureCampaign(ModelBuilder modelBuilder)
@@ -64,11 +76,11 @@ public class CampaignDbContext : DbContext
             entity.Property(c => c.SettingsJson)
                 .HasColumnType("jsonb");
 
-            entity.Property(c => c.CampaignTreeDefinition)
-                .HasColumnType("json");
-
             entity.Property(c => c.ImageUrl)
                 .HasMaxLength(2000);
+
+            entity.Property(c => c.CampaignTreeDefinition)
+                .HasColumnType("json");
 
             entity.Property(c => c.MaxPlayers)
                 .HasDefaultValue(6);
@@ -131,7 +143,6 @@ public class CampaignDbContext : DbContext
             entity.HasOne(s => s.Campaign)
                 .WithMany(c => c.Snapshots)
                 .HasForeignKey(s => s.CampaignId)
-                .IsRequired(false)
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(s => s.CampaignId);
@@ -146,9 +157,9 @@ public class CampaignDbContext : DbContext
         modelBuilder.Entity<CampaignMember>(entity =>
         {
             entity.ToTable("CampaignMembers");
-            
+
             entity.HasKey(m => m.Id);
-            
+
             entity.Property(m => m.Id)
                 .ValueGeneratedOnAdd();
 
@@ -176,7 +187,6 @@ public class CampaignDbContext : DbContext
             entity.HasOne(m => m.Campaign)
                 .WithMany(c => c.Members)
                 .HasForeignKey(m => m.CampaignId)
-                .IsRequired(false)
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Indexes
@@ -184,6 +194,50 @@ public class CampaignDbContext : DbContext
             entity.HasIndex(m => m.UserId);
             entity.HasIndex(m => m.Status);
             entity.HasIndex(m => new { m.CampaignId, m.UserId }).IsUnique();
+        });
+    }
+
+    private static void ConfigureCampaignGameSession(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<CampaignGameSession>(entity =>
+        {
+            entity.ToTable("CampaignGameSessions");
+            entity.HasKey(s => s.Id);
+            entity.Property(s => s.Id).ValueGeneratedOnAdd();
+            entity.Property(s => s.CampaignId).IsRequired();
+            entity.Property(s => s.StartedBy).IsRequired();
+            entity.Property(s => s.Status).HasConversion<string>().HasMaxLength(20);
+            entity.Property(s => s.CurrentNodeId).HasMaxLength(200);
+            entity.HasOne(s => s.Campaign)
+                .WithMany(c => c.GameSessions)
+                .HasForeignKey(s => s.CampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(s => s.CampaignId);
+            entity.HasIndex(s => s.StartedBy);
+            entity.HasIndex(s => s.Status);
+            entity.HasIndex(s => s.StartedAt);
+        });
+    }
+
+    private static void ConfigureSessionHistoryEntry(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<SessionHistoryEntry>(entity =>
+        {
+            entity.ToTable("SessionHistoryEntries");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.SessionId).IsRequired();
+            entity.Property(e => e.NodeId).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.NodeType).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.NodeTitle).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.PortUsed).HasMaxLength(50);
+            entity.Property(e => e.ChoiceText).HasMaxLength(1000);
+            entity.HasOne(e => e.Session)
+                .WithMany(s => s.Entries)
+                .HasForeignKey(e => e.SessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.SessionId);
+            entity.HasIndex(e => e.VisitedAt);
         });
     }
 }
