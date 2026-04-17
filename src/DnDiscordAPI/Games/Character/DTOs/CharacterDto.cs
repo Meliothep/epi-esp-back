@@ -21,6 +21,7 @@ namespace DnDiscordAPI.Games.Character.DTOs
         public int Initiative { get; set; }
         public int Speed { get; set; }
         public AbilityScoresDto Abilities { get; set; }
+        public WalletDto Wallet { get; set; }
         public RaceTraitsDto RaceTraits { get; set; }
         public ClassTraitsDto ClassTraits { get; set; }
     }
@@ -89,5 +90,24 @@ namespace DnDiscordAPI.Games.Character.DTOs
     {
         [Range(0, int.MaxValue)]
         public int HitPoints { get; set; }
+    }
+
+    public class WalletDto
+    {
+        public int CopperPieces { get; set; }
+        public int SilverPieces { get; set; }
+        public int ElectrumPieces { get; set; }
+        public int GoldPieces { get; set; }
+        public int PlatinumPieces { get; set; }
+        public int TotalInCopper { get; set; }
+    }
+
+    public class ModifyWalletRequest
+    {
+        public int CopperPieces { get; set; }
+        public int SilverPieces { get; set; }
+        public int ElectrumPieces { get; set; }
+        public int GoldPieces { get; set; }
+        public int PlatinumPieces { get; set; }
     }
 }

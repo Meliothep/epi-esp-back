@@ -67,5 +67,33 @@ namespace DnDiscordAPI.Games.Controllers
             var character = await _characterService.LevelUpAsync(id);
             return Ok(character);
         }
+
+        [HttpGet("{id}/wallet")]
+        public async Task<ActionResult<WalletDto>> GetWallet(Guid id)
+        {
+            try
+            {
+                var wallet = await _characterService.GetWalletAsync(id);
+                return Ok(wallet);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+        }
+
+        [HttpPatch("{id}/wallet")]
+        public async Task<ActionResult<WalletDto>> ModifyWallet(Guid id, [FromBody] ModifyWalletRequest request)
+        {
+            try
+            {
+                var wallet = await _characterService.ModifyWalletAsync(id, request);
+                return Ok(wallet);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+        }
     }
 }

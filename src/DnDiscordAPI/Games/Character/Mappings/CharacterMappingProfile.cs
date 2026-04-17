@@ -22,6 +22,9 @@ namespace DnDiscordAPI.Games.Character.Mappings
             CreateMap<RaceTraits, RaceTraitsDto>();
             CreateMap<ClassTraits, ClassTraitsDto>();
 
+            // Wallet mappings
+            CreateMap<Wallet, WalletDto>();
+            CreateMap<WalletDto, Wallet>();
         }
     }
 }
