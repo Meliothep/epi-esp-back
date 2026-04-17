@@ -10,6 +10,7 @@ public static class MultiplayerServiceExtensions
     {
         // Services Singleton (thread-safe)
         services.AddSingleton<StateManager>();
+        services.AddSingleton<SessionUnitPositionStore>();
         services.AddSingleton<IGameActionValidator, GameActionValidator>();
         services.AddSingleton<SessionManager>();
         services.AddSingleton<TurnManager>();
