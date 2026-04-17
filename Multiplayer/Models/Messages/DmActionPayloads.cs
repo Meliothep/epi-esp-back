@@ -60,3 +60,27 @@ public class ItemGrantedPayload
     public string? Description { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>
+/// DM spawns a new enemy unit on the board.
+/// </summary>
+public class DmSpawnUnitPayload
+{
+    /// <summary>Unique ID for the new unit (generated client-side).</summary>
+    public string UnitId { get; set; } = string.Empty;
+
+    /// <summary>Template key from the enemy catalogue (e.g. "skeleton_warrior").</summary>
+    public string TemplateId { get; set; } = string.Empty;
+
+    /// <summary>Display name of the unit.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Unit type key (e.g. "enemy_skeleton").</summary>
+    public string UnitType { get; set; } = string.Empty;
+
+    /// <summary>Target grid position.</summary>
+    public GridPosition Target { get; set; } = new();
+
+    /// <summary>Serialised unit stats (JSON).</summary>
+    public string StatsJson { get; set; } = string.Empty;
+}

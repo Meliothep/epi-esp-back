@@ -509,7 +509,7 @@ public class GameHub : Hub
             userId, payload.UnitId, payload.Target.X, payload.Target.Y, sessionId);
 
         var message = _messageSequencer.CreateMessage(sessionId, "DmTokenMoved", payload);
-        await Clients.Group(sessionId).SendAsync("DmTokenMoved", message);
+        await Clients.OthersInGroup(sessionId).SendAsync("DmTokenMoved", message);
     }
 
     /// <summary>
@@ -587,6 +587,30 @@ public class GameHub : Hub
 
         var message = _messageSequencer.CreateMessage(sessionId, "ItemGranted", grantedPayload);
         await Clients.Group(sessionId).SendAsync("ItemGranted", message);
+    }
+
+    /// <summary>
+    /// DM spawns a new enemy unit on the board. Broadcasts DmUnitSpawned to all players.
+    /// </summary>
+    public async Task DmSpawnUnit(DmSpawnUnitPayload payload)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null)
+            throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null)
+            throw new HubException("Session not found");
+
+        var userId = GetUserId();
+        if (session.DmUserId != userId)
+            throw new HubException("Only the DM can spawn units");
+
+        _logger.LogInformation("DM {UserId} spawned {UnitType} '{Name}' at ({X},{Y}) in session {SessionId}",
+            userId, payload.UnitType, payload.Name, payload.Target.X, payload.Target.Y, sessionId);
+
+        var message = _messageSequencer.CreateMessage(sessionId, "DmUnitSpawned", payload);
+        await Clients.OthersInGroup(sessionId).SendAsync("DmUnitSpawned", message);
     }
 
     #endregion
