@@ -1,5 +1,6 @@
 using DnDiscord.Campaign.BL.Campaigns;
 using DnDiscord.Campaign.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -10,6 +11,7 @@ namespace DnDiscord.Campaign.Controllers;
 /// DM-only actions for a campaign session (grant items, etc.).
 /// </summary>
 [ApiController]
+[Authorize]
 [Route("api/campaigns/{campaignId:guid}/dm")]
 [Produces("application/json")]
 public class DmController : ControllerBase
