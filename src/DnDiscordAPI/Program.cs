@@ -56,12 +56,10 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Configuration Swagger/OpenAPI
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new() { Title = "DnDiscord API", Version = "v1" });
-});
-
+// API documentation UI: Scalar, mapped in ServiceDefaults via MapScalarApiReference.
+// Reachable at http://localhost:5054/scalar/v1 (no /swagger endpoint — the SwaggerGen
+// registration that used to live here was never paired with UseSwagger/UseSwaggerUI
+// middleware, so it did nothing; Scalar is the only live docs surface).
 string? scalarURL = Environment.GetEnvironmentVariable("SCALAR_URLS");
 scalarURL = scalarURL != null ? scalarURL : "http://localhost:5054";
 builder.AddObservability();
