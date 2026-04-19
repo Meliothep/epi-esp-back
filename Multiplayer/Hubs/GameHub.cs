@@ -355,9 +355,10 @@ public class GameHub : Hub
         session.MapId = mapId;
         session.LastActivityAt = DateTime.UtcNow;
 
-        // Build unit assignments for each player
+        // Build unit assignments for each player. DM is a pure overseer — they don't
+        // get a token on the board, even if they happened to select a character earlier.
         var assignments = new List<UnitAssignment>();
-        foreach (var player in session.Players)
+        foreach (var player in session.Players.Where(p => p.Role != PlayerRole.DungeonMaster))
         {
             UnitAssignment assignment;
             if (player.SelectedCharacterId.HasValue)
