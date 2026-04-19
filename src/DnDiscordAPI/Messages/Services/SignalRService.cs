@@ -56,6 +56,26 @@ namespace DnDiscordAPI.Messages.Services
         }
 
         /// <summary>
+        /// Session-scoped "item used" notification — drives toast / sound effect while the
+        /// actual inventory state change is already covered by InventoryChanged.
+        /// </summary>
+        public async Task SendInventoryItemUsedAsync(string? sessionId, InventoryItemUsedEvent evt)
+        {
+            if (string.IsNullOrEmpty(sessionId)) return;
+
+            try
+            {
+                await _gameHubContext.Clients.Group(sessionId).SendAsync("InventoryItemUsed", evt);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to broadcast InventoryItemUsed for character {CharacterId}",
+                    evt.CharacterId);
+            }
+        }
+
+        /// <summary>
         /// User-scoped wallet broadcast. <paramref name="ownerDiscordUserId"/> is the owner's
         /// Discord snowflake; routed through <see cref="DiscordUserIdProvider"/> so only that
         /// player's connections receive the event.

@@ -107,6 +107,31 @@ namespace DnDiscordAPI.Games.Controllers
         }
 
         /// <summary>
+        /// Consume one unit of an inventory entry (potion drunk, scroll read, …).
+        /// Owner-only — DMs can't use a player's consumable on their behalf.
+        /// </summary>
+        [HttpPost("{characterId:guid}/entry/{entryId:guid}/use")]
+        public async Task<IActionResult> UseEntry(
+            Guid characterId,
+            Guid entryId,
+            [FromQuery] Guid? campaignId)
+        {
+            var ownerDiscordId = await _characterService.GetOwnerDiscordIdAsync(characterId);
+            if (ownerDiscordId == null || ownerDiscordId != _userContext.GetCurrentDiscordUserId())
+                return Forbid();
+
+            try
+            {
+                await _inventoryService.UseEntryAsync(characterId, entryId, campaignId);
+                return NoContent();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// True if the caller owns the character, or is DM of the provided campaign.
         /// </summary>
         private async Task<bool> CanAccessCharacterAsync(Guid characterId, Guid? campaignId, CancellationToken ct)

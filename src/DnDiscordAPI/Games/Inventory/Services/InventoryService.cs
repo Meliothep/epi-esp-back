@@ -14,6 +14,13 @@ namespace DnDiscordAPI.Games.Inventory.Services
         Task<List<InventoryEntryDto>> GetCharacterInventoryAsync(Guid characterId);
         Task<InventoryEntryDto> GiveItemAsync(Guid characterId, GiveItemRequest request);
         Task RemoveEntryAsync(Guid characterId, Guid entryId, Guid? campaignId = null);
+
+        /// <summary>
+        /// Consume one unit of an inventory entry. Decrements quantity (or removes the
+        /// entry when it hits zero) and fires InventoryItemUsed alongside the regular
+        /// InventoryChanged event. Effect resolution (healing, light, …) is a POC stub.
+        /// </summary>
+        Task UseEntryAsync(Guid characterId, Guid entryId, Guid? campaignId = null);
     }
 
     public class InventoryService : IInventoryService
@@ -143,6 +150,54 @@ namespace DnDiscordAPI.Games.Inventory.Services
 
                 _logger.LogInformation("Removed inventory entry {Entry} from character {Character}", entryId, characterId);
             }
+        }
+
+        public async Task UseEntryAsync(Guid characterId, Guid entryId, Guid? campaignId = null)
+        {
+            var entry = await _context.InventoryEntries
+                .Include(e => e.Item)
+                .FirstOrDefaultAsync(e => e.Id == entryId && e.CharacterId == characterId)
+                ?? throw new KeyNotFoundException($"Inventory entry {entryId} not found for character {characterId}");
+
+            var sessionId = ResolveSessionId(campaignId);
+            var item = entry.Item!;
+
+            // POC: effect resolution is a stub — just log. Future work would branch on
+            // item.Category / item.Id to apply healing, toggle a light, etc.
+            _logger.LogInformation(
+                "Character {Character} used {ItemName} ({ItemId}) — effect stub",
+                characterId, item.Name, item.Id);
+
+            InventoryChangeAction action;
+            InventoryEntryDto dto;
+            if (entry.Quantity > 1)
+            {
+                entry.Quantity -= 1;
+                await _context.SaveChangesAsync();
+                dto = _mapper.Map<InventoryEntryDto>(entry);
+                action = InventoryChangeAction.Updated;
+            }
+            else
+            {
+                dto = _mapper.Map<InventoryEntryDto>(entry);
+                _context.InventoryEntries.Remove(entry);
+                await _context.SaveChangesAsync();
+                action = InventoryChangeAction.Removed;
+            }
+
+            await _signalR.SendInventoryChangedAsync(sessionId, new InventoryChangedEvent
+            {
+                CharacterId = characterId,
+                Action = action,
+                Entry = dto,
+            });
+
+            await _signalR.SendInventoryItemUsedAsync(sessionId, new InventoryItemUsedEvent
+            {
+                CharacterId = characterId,
+                ItemId = item.Id,
+                ItemName = item.Name,
+            });
         }
 
         /// <summary>
