@@ -49,12 +49,15 @@ services:
       - 5054:5054
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - Jwt__SecretKey=${JWT_SECRET_KEY:-c13b64cb-d917-403b-b97c-da659b7da484}
+      # Secrets must come from .env (see .env.example). No defaults — if any of the
+      # required JWT / Discord env vars are unset the container will fail to start
+      # rather than silently using a committed test value.
+      - Jwt__SecretKey=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
       - Jwt__Issuer=${JWT_ISSUER:-dndiscord-backend}
       - Jwt__Audience=${JWT_AUDIENCE:-dndiscord-frontend}
       - Jwt__ExpirationMinutes=${JWT_EXPIRATION_MINUTES:-10080}
-      - Discord__ClientId=${DISCORD_CLIENT_ID:-1433484276535398450}
-      - Discord__ClientSecret=${DISCORD_CLIENT_SECRET:-n57avmFcBB3YEHiZfbDl2vGWDmkt2COm}
+      - Discord__ClientId=${DISCORD_CLIENT_ID:?DISCORD_CLIENT_ID is required}
+      - Discord__ClientSecret=${DISCORD_CLIENT_SECRET:?DISCORD_CLIENT_SECRET is required}
       - Discord__RedirectUri=${DISCORD_REDIRECT_URI:-http://localhost:3000/auth/callback}
       - Cors__Origins__0=${CORS_ORIGIN:-http://localhost:3000}
     volumes:
