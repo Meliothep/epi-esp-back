@@ -26,35 +26,37 @@ public class DmHiddenRollPayload
 }
 
 /// <summary>
-/// Request for the DM to grant an item to a player character.
-/// Used both by the REST endpoint and the SignalR hub.
+/// DM grants an item to a player character via the SignalR hub. The hub persists
+/// through IInventoryService and broadcasts ItemGranted for toasts.
 /// </summary>
 public class DmGrantItemPayload
 {
     /// <summary>Target player's user ID (Guid).</summary>
     public Guid TargetUserId { get; set; }
 
-    /// <summary>Item identifier from the catalogue.</summary>
-    public string ItemId { get; set; } = string.Empty;
+    /// <summary>Item identifier from the catalogue (matches Item.Id).</summary>
+    public Guid ItemId { get; set; }
 
-    /// <summary>Display name of the item.</summary>
+    /// <summary>Display name of the item (used only for the toast).</summary>
     public string ItemName { get; set; } = string.Empty;
 
     /// <summary>Quantity granted.</summary>
     public int Quantity { get; set; } = 1;
 
-    /// <summary>Optional description or flavour text.</summary>
+    /// <summary>Optional description or flavour text for the toast.</summary>
     public string? Description { get; set; }
 }
 
 /// <summary>
-/// Broadcast payload when a player receives an item from the DM.
+/// Broadcast payload when a player receives an item from the DM — drives the
+/// "X received Y from the DM" toast. Inventory state changes go via the
+/// InventoryChanged event.
 /// </summary>
 public class ItemGrantedPayload
 {
     public Guid TargetUserId { get; set; }
     public string TargetUserName { get; set; } = string.Empty;
-    public string ItemId { get; set; } = string.Empty;
+    public Guid ItemId { get; set; }
     public string ItemName { get; set; } = string.Empty;
     public int Quantity { get; set; } = 1;
     public string? Description { get; set; }

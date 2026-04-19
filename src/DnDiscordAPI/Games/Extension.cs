@@ -26,6 +26,7 @@ public static class GamesExtensions
         builder.Services.AddScoped<ICharacterRepository, CharacterRepository>();
         builder.Services.AddScoped<ICharacterLookupService, CharacterLookupAdapter>();
         builder.Services.AddScoped<IInventoryService, InventoryService>();
+        builder.Services.AddScoped<IInventoryGrantService, InventoryGrantAdapter>();
 
         return builder;
     }

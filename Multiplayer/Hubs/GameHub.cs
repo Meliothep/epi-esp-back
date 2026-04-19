@@ -20,13 +20,14 @@ public class GameHub : Hub
     private readonly IGameActionValidator _validator;
     private readonly IUserContextService _userContextService;
     private readonly ICharacterLookupService _characterLookup;
+    private readonly IInventoryGrantService _inventoryGrant;
 
     /// <summary>
     /// Constructeur du GameHub
     /// </summary>
     public GameHub(ILogger<GameHub> logger, SessionManager sessionManager, MessageSequencer messageSequencer,
         StateManager stateManager, IGameActionValidator validator, IUserContextService userContextService,
-        ICharacterLookupService characterLookup)
+        ICharacterLookupService characterLookup, IInventoryGrantService inventoryGrant)
     {
         _logger = logger;
         _sessionManager = sessionManager;
@@ -35,6 +36,7 @@ public class GameHub : Hub
         _validator = validator;
         _userContextService = userContextService;
         _characterLookup = characterLookup;
+        _inventoryGrant = inventoryGrant;
     }
 
     /// <summary>
@@ -551,7 +553,8 @@ public class GameHub : Hub
     }
 
     /// <summary>
-    /// DM grants an item to a player character. Broadcasts to all so UI can update.
+    /// DM grants an item to a player character. Persists via IInventoryService
+    /// (which fires InventoryChanged) and broadcasts ItemGranted for the toast.
     /// </summary>
     public async Task DmGrantItem(DmGrantItemPayload payload)
     {
@@ -571,19 +574,36 @@ public class GameHub : Hub
         if (targetPlayer == null)
             throw new HubException("Target player not found in session");
 
+        if (targetPlayer.SelectedCharacterId is not Guid characterId)
+            throw new HubException("Target player has not selected a character");
+
+        if (session.CampaignId is not Guid campaignId)
+            throw new HubException("Session is not attached to a campaign");
+
+        InventoryGrantResult result;
+        try
+        {
+            result = await _inventoryGrant.GrantItemAsync(characterId, payload.ItemId, payload.Quantity, campaignId);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+
         var grantedPayload = new ItemGrantedPayload
         {
             TargetUserId = payload.TargetUserId,
             TargetUserName = targetPlayer.UserName ?? "Inconnu",
             ItemId = payload.ItemId,
-            ItemName = payload.ItemName,
+            ItemName = result.ItemName,
             Quantity = payload.Quantity,
             Description = payload.Description,
-            Timestamp = DateTime.UtcNow
+            Timestamp = DateTime.UtcNow,
         };
 
-        _logger.LogInformation("DM {UserId} granted {Quantity}x {ItemName} to {TargetUserId} in session {SessionId}",
-            userId, payload.Quantity, payload.ItemName, payload.TargetUserId, sessionId);
+        _logger.LogInformation(
+            "DM {UserId} granted {Quantity}x {ItemName} to character {CharacterId} in session {SessionId}",
+            userId, payload.Quantity, result.ItemName, characterId, sessionId);
 
         var message = _messageSequencer.CreateMessage(sessionId, "ItemGranted", grantedPayload);
         await Clients.Group(sessionId).SendAsync("ItemGranted", message);
