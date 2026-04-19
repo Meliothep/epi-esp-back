@@ -492,6 +492,30 @@ public class GameHub : Hub
     #region [== DM Tools ==]
 
     /// <summary>
+    /// DM flips the session from free-roam into combat preparation. All clients
+    /// receive <c>CombatStarted</c> and transition their local phase. The actual
+    /// <c>COMBAT_PREPARATION → PLAYER_TURN</c> step still happens when players
+    /// click the existing "Prêt" button.
+    /// </summary>
+    public async Task DmStartCombat()
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId)
+            ?? throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+
+        if (session.DmUserId != GetUserId())
+            throw new HubException("Only the DM can start combat");
+
+        _logger.LogInformation("DM {UserId} started combat in session {SessionId}",
+            session.DmUserId, sessionId);
+
+        var message = _messageSequencer.CreateMessage(sessionId, "CombatStarted", new { sessionId });
+        await Clients.Group(sessionId).SendAsync("CombatStarted", message);
+    }
+
+    /// <summary>
     /// DM force-moves any token on the board. Broadcasts DmTokenMoved to all players.
     /// </summary>
     public async Task DmMoveToken(DmMoveTokenPayload payload)
