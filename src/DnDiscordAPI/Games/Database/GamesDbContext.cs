@@ -89,8 +89,17 @@ namespace DnDiscordAPI.Games.Database
                     .HasForeignKey(e => e.ItemId)
                     .OnDelete(DeleteBehavior.Restrict);
 
+                // Cascade on Character delete so a removed character takes its bag with it
+                // (no orphaned InventoryEntries pointing at a missing CharacterId).
+                entity.HasOne<Character.Models.Character>()
+                    .WithMany()
+                    .HasForeignKey(e => e.CharacterId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
                 entity.HasIndex(e => e.CharacterId);
-                entity.HasIndex(e => new { e.CharacterId, e.ItemId });
+                // Unique composite prevents duplicate rows for the same (character, item)
+                // under concurrent GiveItemAsync calls — the service stacks instead.
+                entity.HasIndex(e => new { e.CharacterId, e.ItemId }).IsUnique();
             });
         }
 
