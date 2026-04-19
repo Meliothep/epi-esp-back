@@ -37,6 +37,12 @@ public class CampaignDbContext : DbContext
     /// </summary>
     public DbSet<SessionHistoryEntry> SessionHistoryEntries => Set<SessionHistoryEntry>();
 
+    /// <summary>
+    /// Maps persisted for each campaign — the DM picks from these to start/switch
+    /// the scene during a session.
+    /// </summary>
+    public DbSet<CampaignMap> Maps => Set<CampaignMap>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -46,6 +52,28 @@ public class CampaignDbContext : DbContext
         ConfigureCampaignMember(modelBuilder);
         ConfigureCampaignGameSession(modelBuilder);
         ConfigureSessionHistoryEntry(modelBuilder);
+        ConfigureCampaignMap(modelBuilder);
+    }
+
+    private static void ConfigureCampaignMap(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<CampaignMap>(entity =>
+        {
+            entity.ToTable("CampaignMaps");
+            entity.HasKey(m => m.Id);
+            entity.Property(m => m.Id).ValueGeneratedOnAdd();
+
+            entity.Property(m => m.Name).IsRequired().HasMaxLength(200);
+            entity.Property(m => m.Data).IsRequired().HasColumnType("jsonb");
+
+            entity.HasOne<Models.Campaign>()
+                .WithMany()
+                .HasForeignKey(m => m.CampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(m => m.CampaignId);
+            entity.HasIndex(m => new { m.CampaignId, m.CreatedAt });
+        });
     }
 
     private static void ConfigureCampaign(ModelBuilder modelBuilder)

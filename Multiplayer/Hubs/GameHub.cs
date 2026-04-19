@@ -21,13 +21,15 @@ public class GameHub : Hub
     private readonly IUserContextService _userContextService;
     private readonly ICharacterLookupService _characterLookup;
     private readonly IInventoryGrantService _inventoryGrant;
+    private readonly ICampaignMapLookupService _mapLookup;
 
     /// <summary>
     /// Constructeur du GameHub
     /// </summary>
     public GameHub(ILogger<GameHub> logger, SessionManager sessionManager, MessageSequencer messageSequencer,
         StateManager stateManager, IGameActionValidator validator, IUserContextService userContextService,
-        ICharacterLookupService characterLookup, IInventoryGrantService inventoryGrant)
+        ICharacterLookupService characterLookup, IInventoryGrantService inventoryGrant,
+        ICampaignMapLookupService mapLookup)
     {
         _logger = logger;
         _sessionManager = sessionManager;
@@ -37,6 +39,7 @@ public class GameHub : Hub
         _userContextService = userContextService;
         _characterLookup = characterLookup;
         _inventoryGrant = inventoryGrant;
+        _mapLookup = mapLookup;
     }
 
     /// <summary>
@@ -513,6 +516,42 @@ public class GameHub : Hub
     }
 
     #region [== DM Tools ==]
+
+    /// <summary>
+    /// DM switches the session to a different map from the campaign's map pool.
+    /// The server looks up the map by id (DM must own the campaign), updates the
+    /// session's tracked map id, and broadcasts <c>MapSwitched</c> with the map's
+    /// blob to every client so they can reload the scene.
+    /// </summary>
+    public async Task DmSwitchMap(Guid mapId)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId)
+            ?? throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+
+        if (session.DmUserId != GetUserId())
+            throw new HubException("Only the DM can switch maps");
+
+        if (session.CampaignId is not Guid campaignId)
+            throw new HubException("Map switching requires a campaign session");
+
+        var map = await _mapLookup.GetMapAsync(campaignId, mapId)
+            ?? throw new HubException("Map not found for this campaign");
+
+        _sessionManager.SetSessionMapId(sessionId, map.Id.ToString());
+
+        _logger.LogInformation("DM {UserId} switched session {SessionId} to map {MapName} ({MapId})",
+            session.DmUserId, sessionId, map.Name, map.Id);
+
+        await Clients.Group(sessionId).SendAsync("MapSwitched", new
+        {
+            mapId = map.Id,
+            name = map.Name,
+            data = map.Data,
+        });
+    }
 
     /// <summary>
     /// DM flips the session from free-roam into combat preparation. All clients
