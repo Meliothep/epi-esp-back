@@ -335,6 +335,22 @@ public class GameHub : Hub
     /// </summary>
     public async Task StartGame(string mapId, string? mapData = null)
     {
+        await StartOrRestartGameAsync(mapId, mapData, allowRestart: false);
+    }
+
+    /// <summary>
+    /// DM-only reset of an in-progress session. Rebuilds unit assignments from the
+    /// current character selections and re-broadcasts <c>GameStarted</c> to every
+    /// client. Plain <c>StartGame</c> refuses when state != Lobby, which left the
+    /// only recovery path as "everyone leave and rejoin" — this closes that gap.
+    /// </summary>
+    public async Task DmRestartGame(string mapId, string? mapData = null)
+    {
+        await StartOrRestartGameAsync(mapId, mapData, allowRestart: true);
+    }
+
+    private async Task StartOrRestartGameAsync(string mapId, string? mapData, bool allowRestart)
+    {
         var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
         if (sessionId == null)
             throw new HubException("Not in a session");
@@ -347,7 +363,7 @@ public class GameHub : Hub
         if (session.DmUserId != userId)
             throw new HubException("Only the host can start the game");
 
-        if (session.State != SessionState.Lobby)
+        if (!allowRestart && session.State != SessionState.Lobby)
             throw new HubException("Game already started");
 
         // Set session state
@@ -414,6 +430,13 @@ public class GameHub : Hub
             sessionId, mapId, assignments.Count);
 
         await Clients.Group(sessionId).SendAsync("GameStarted", payload);
+
+        // Re-broadcast the session info so every client (including a DM that
+        // connected after players picked their characters) has fresh
+        // selectedCharacterId values — the DmPlayerInspectPanel needs them to
+        // look up the player's inventory when the DM clicks their unit.
+        var sessionInfo = MapToSessionInfo(session);
+        await Clients.Group(sessionId).SendAsync("PlayerUpdated", sessionInfo);
     }
 
     private static UnitAssignment BuildDefaultAssignment(SessionPlayer player)
