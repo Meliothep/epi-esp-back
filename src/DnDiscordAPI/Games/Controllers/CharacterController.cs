@@ -37,8 +37,15 @@ namespace DnDiscordAPI.Games.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<CharacterDto>> GetCharacter(Guid id)
         {
-            var character = await _characterService.GetCharacterAsync(id);
-            return Ok(character);
+            try
+            {
+                var character = await _characterService.GetCharacterAsync(id);
+                return Ok(character);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
         }
 
         [HttpGet("my-characters")]
@@ -59,15 +66,29 @@ namespace DnDiscordAPI.Games.Controllers
             Guid id,
             [FromBody] UpdateHitPointsRequest request)
         {
-            var character = await _characterService.UpdateHitPointsAsync(id, request.HitPoints);
-            return Ok(character);
+            try
+            {
+                var character = await _characterService.UpdateHitPointsAsync(id, request.HitPoints);
+                return Ok(character);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
         }
 
         [HttpPost("{id}/level-up")]
         public async Task<ActionResult<CharacterDto>> LevelUp(Guid id)
         {
-            var character = await _characterService.LevelUpAsync(id);
-            return Ok(character);
+            try
+            {
+                var character = await _characterService.LevelUpAsync(id);
+                return Ok(character);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
         }
 
         [HttpGet("{id}/wallet")]

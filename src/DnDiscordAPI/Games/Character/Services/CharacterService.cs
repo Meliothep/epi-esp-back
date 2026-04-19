@@ -102,7 +102,7 @@ namespace DnDiscordAPI.Games.Character.Services
                 .FirstOrDefaultAsync(c => c.Id == characterId);
 
             if (character == null)
-                throw new Exception($"Character {characterId} not found");
+                throw new KeyNotFoundException($"Character {characterId} not found");
 
             return _mapper.Map<CharacterDto>(character);
         }
@@ -111,7 +111,7 @@ namespace DnDiscordAPI.Games.Character.Services
         {
             var character = await _context.Characters.FindAsync(characterId);
             if (character == null)
-                throw new Exception($"Character {characterId} not found");
+                throw new KeyNotFoundException($"Character {characterId} not found");
 
             character.CurrentHitPoints = Math.Clamp(newHitPoints, 0, character.MaxHitPoints);
             character.UpdatedAt = DateTime.UtcNow;
@@ -149,7 +149,7 @@ namespace DnDiscordAPI.Games.Character.Services
         {
             var character = await _context.Characters.FindAsync(characterId);
             if (character == null)
-                throw new Exception($"Character {characterId} not found");
+                throw new KeyNotFoundException($"Character {characterId} not found");
 
             // Augmenter le niveau
             character.Level++;
