@@ -54,6 +54,22 @@ public class UserContextService : IUserContextService
         return discordId;
     }
 
+    /// <inheritdoc />
+    public string GetCurrentUserName()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user == null) return string.Empty;
+
+        // Try the common claim names in order. Discord's token mapping doesn't
+        // always populate every slot, hence the cascade.
+        return user.FindFirst("preferred_username")?.Value
+            ?? user.FindFirst(ClaimTypes.Name)?.Value
+            ?? user.FindFirst("name")?.Value
+            ?? user.FindFirst("unique_name")?.Value
+            ?? user.FindFirst("username")?.Value
+            ?? string.Empty;
+    }
+
     /// <summary>
     /// Converts a Discord ID (string) to a deterministic Guid using MD5 hashing.
     /// </summary>

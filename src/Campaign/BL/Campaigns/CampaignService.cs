@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using DnDiscord.Campaign.BL.Campaigns.DTOs;
 using DnDiscord.Campaign.DataAccess;
 using DnDiscord.Campaign.DataAccess.Models;
+using DnDiscord.Campaign.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using CampaignEntity = DnDiscord.Campaign.DataAccess.Models.Campaign;
@@ -48,15 +49,18 @@ public class CampaignService : ICampaignService
 {
     private readonly CampaignDbContext _dbContext;
     private readonly ICampaignValidator _validator;
+    private readonly IUserContextService _userContext;
     private readonly ILogger<CampaignService> _logger;
-    
+
     public CampaignService(
         CampaignDbContext dbContext,
         ICampaignValidator validator,
+        IUserContextService userContext,
         ILogger<CampaignService> logger)
     {
         _dbContext = dbContext;
         _validator = validator;
+        _userContext = userContext;
         _logger = logger;
     }
     
@@ -360,7 +364,15 @@ public class CampaignService : ICampaignService
             throw new CampaignException("You are the Dungeon Master of this campaign");
         }
         
-        // Add member
+        // Add member. Seed Nickname with the JWT's display name so the UI doesn't
+        // fall back to the raw user GUID. Falls back to "Aventurier #short" when
+        // the token doesn't carry a username claim (e.g. service-to-service calls).
+        var displayName = _userContext.GetCurrentUserName();
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            displayName = $"Aventurier #{userId.ToString("N")[..6]}";
+        }
+
         var member = new CampaignMember
         {
             Id = Guid.NewGuid(),
@@ -369,7 +381,8 @@ public class CampaignService : ICampaignService
             Role = CampaignMemberRole.Player,
             Status = MembershipStatus.Active,
             JoinedAt = DateTime.UtcNow,
-            AcceptedAt = DateTime.UtcNow
+            AcceptedAt = DateTime.UtcNow,
+            Nickname = displayName,
         };
         
         _dbContext.CampaignMembers.Add(member);

@@ -334,6 +334,28 @@ public class GameHub : Hub
     }
 
     /// <summary>
+    /// Pick a lobby quickstart preset (warrior / mage / archer) instead of a
+    /// persisted character. Mutually exclusive with <c>SelectCharacter</c>.
+    /// </summary>
+    public async Task SelectDefaultTemplate(string? templateId)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId)
+            ?? throw new HubException("Not in a session");
+
+        if (templateId is not null && templateId is not ("warrior" or "mage" or "archer"))
+            throw new HubException($"Unknown template '{templateId}'");
+
+        var userId = GetUserId();
+        _sessionManager.SetPlayerDefaultTemplate(sessionId, userId, templateId);
+
+        var session = _sessionManager.GetSession(sessionId);
+        if (session is null) return;
+
+        var sessionInfo = MapToSessionInfo(session);
+        await Clients.Group(sessionId).SendAsync("PlayerUpdated", sessionInfo);
+    }
+
+    /// <summary>
     /// Lancer la partie (host/DM uniquement). Construit les UnitAssignments à partir des personnages sélectionnés.
     /// </summary>
     public async Task StartGame(string mapId, string? mapData = null)
@@ -411,12 +433,12 @@ public class GameHub : Hub
                 }
                 catch
                 {
-                    assignment = BuildDefaultAssignment(player);
+                    assignment = BuildDefaultAssignment(player, player.SelectedDefaultTemplate);
                 }
             }
             else
             {
-                assignment = BuildDefaultAssignment(player);
+                assignment = BuildDefaultAssignment(player, player.SelectedDefaultTemplate);
             }
 
             assignments.Add(assignment);
@@ -442,23 +464,33 @@ public class GameHub : Hub
         await Clients.Group(sessionId).SendAsync("PlayerUpdated", sessionInfo);
     }
 
-    private static UnitAssignment BuildDefaultAssignment(SessionPlayer player)
+    private static UnitAssignment BuildDefaultAssignment(SessionPlayer player, string? templateId = null)
     {
+        // Three preset quickstarts so new players without a persisted character
+        // still get class variety. Template ids match the front's button labels.
+        var (className, maxHp, ac, speed, init, atk, def, mov, range) = templateId switch
+        {
+            "mage"   => ("Mage",    80,  12, 30, 14, 22, 12, 6, 6),
+            "archer" => ("Archer",  100, 14, 35, 16, 18, 13, 7, 5),
+            // "warrior" or null/unknown fall through to the original stats.
+            _        => ("Guerrier", 120, 15, 30, 12, 20, 15, 6, 1),
+        };
+
         return new UnitAssignment
         {
             UserId = player.UserId,
             UnitId = $"player_{player.UserId.ToString("N")[..8]}",
             UnitName = player.UserName ?? "Aventurier",
-            CharacterClass = "Guerrier",
-            MaxHp = 120,
-            CurrentHp = 120,
-            ArmorClass = 15,
-            Speed = 30,
-            Initiative = 12,
-            AttackDamage = 20,
-            Defense = 15,
-            MovementRange = 6,
-            AttackRange = 1
+            CharacterClass = className,
+            MaxHp = maxHp,
+            CurrentHp = maxHp,
+            ArmorClass = ac,
+            Speed = speed,
+            Initiative = init,
+            AttackDamage = atk,
+            Defense = def,
+            MovementRange = mov,
+            AttackRange = range,
         };
     }
 
@@ -510,7 +542,8 @@ public class GameHub : Hub
                 UserName = p.UserName ?? "Inconnu",
                 Role = p.Role,
                 Status = p.Status,
-                SelectedCharacterId = p.SelectedCharacterId
+                SelectedCharacterId = p.SelectedCharacterId,
+                SelectedDefaultTemplate = p.SelectedDefaultTemplate,
             }).ToList()
         };
     }

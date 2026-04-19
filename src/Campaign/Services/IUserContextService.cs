@@ -18,4 +18,11 @@ public interface IUserContextService
     /// Use this to match against Character.DiscordUserId for ownership checks.
     /// </summary>
     string GetCurrentDiscordUserId();
+
+    /// <summary>
+    /// Best-effort human-readable username from JWT claims (preferred_username / name
+    /// / unique_name). Returns an empty string when no display claim is present —
+    /// callers should treat that as "use a fallback like 'Aventurier #shortid'".
+    /// </summary>
+    string GetCurrentUserName();
 }

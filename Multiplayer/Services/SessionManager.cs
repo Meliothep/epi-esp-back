@@ -336,6 +336,7 @@ public class SessionManager
 
     /// <summary>
     /// Définir le personnage sélectionné par un joueur dans la session.
+    /// Choosing a real character clears any previously-picked default template.
     /// </summary>
     public bool SetPlayerCharacter(string sessionId, Guid userId, Guid? characterId)
     {
@@ -349,6 +350,29 @@ public class SessionManager
                 return false;
 
             player.SelectedCharacterId = characterId;
+            if (characterId.HasValue) player.SelectedDefaultTemplate = null;
+            session.LastActivityAt = DateTime.UtcNow;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Pick a preset template (warrior / mage / archer) as a no-persisted-character
+    /// quickstart. Mutually exclusive with a real SelectedCharacterId.
+    /// </summary>
+    public bool SetPlayerDefaultTemplate(string sessionId, Guid userId, string? templateId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            return false;
+
+        lock (session.Players)
+        {
+            var player = session.Players.FirstOrDefault(p => p.UserId == userId);
+            if (player == null)
+                return false;
+
+            player.SelectedDefaultTemplate = string.IsNullOrWhiteSpace(templateId) ? null : templateId;
+            if (!string.IsNullOrWhiteSpace(templateId)) player.SelectedCharacterId = null;
             session.LastActivityAt = DateTime.UtcNow;
             return true;
         }
