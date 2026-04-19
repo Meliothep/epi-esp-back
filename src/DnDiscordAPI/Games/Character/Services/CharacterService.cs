@@ -16,6 +16,12 @@ namespace DnDiscordAPI.Games.Character.Services
         Task<CharacterDto> LevelUpAsync(Guid characterId);
         Task<WalletDto> GetWalletAsync(Guid characterId);
         Task<WalletDto> ModifyWalletAsync(Guid characterId, ModifyWalletRequest request);
+
+        /// <summary>
+        /// Returns the Discord user id string that owns the character, or null if the character
+        /// doesn't exist. Projection-only query — doesn't materialise the full entity.
+        /// </summary>
+        Task<string?> GetOwnerDiscordIdAsync(Guid characterId);
     }
 
 
@@ -186,6 +192,15 @@ namespace DnDiscordAPI.Games.Character.Services
             };
 
             return Random.Shared.Next(1, dieSize + 1);
+        }
+
+        public Task<string?> GetOwnerDiscordIdAsync(Guid characterId)
+        {
+            return _context.Characters
+                .AsNoTracking()
+                .Where(c => c.Id == characterId)
+                .Select(c => c.DiscordUserId)
+                .FirstOrDefaultAsync();
         }
 
         public async Task<WalletDto> GetWalletAsync(Guid characterId)

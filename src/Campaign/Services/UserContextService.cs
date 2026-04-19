@@ -28,6 +28,12 @@ public class UserContextService : IUserContextService
     /// </summary>
     public Guid GetCurrentUserId()
     {
+        return ConvertDiscordIdToGuid(GetCurrentDiscordUserId());
+    }
+
+    /// <inheritdoc />
+    public string GetCurrentDiscordUserId()
+    {
         var user = _httpContextAccessor.HttpContext?.User;
 
         if (user == null)
@@ -45,8 +51,7 @@ public class UserContextService : IUserContextService
             throw new UnauthorizedAccessException("User ID not found in token");
         }
 
-        // Convert Discord ID string to deterministic Guid using MD5 hash
-        return ConvertDiscordIdToGuid(discordId);
+        return discordId;
     }
 
     /// <summary>

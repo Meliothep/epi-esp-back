@@ -33,6 +33,12 @@ public interface ICampaignService
 
     // Campaign tree
     Task<CampaignDetailResponse?> UpdateCampaignTreeAsync(Guid campaignId, string? treeDefinition, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lightweight check: returns true iff the campaign exists and the user is its DM.
+    /// Prefer this over GetCampaignAsync when you only need the auth answer.
+    /// </summary>
+    Task<bool> IsDungeonMasterAsync(Guid campaignId, Guid userId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -657,7 +663,15 @@ public class CampaignService : ICampaignService
             AcceptedAt = member.AcceptedAt
         };
     }
-    
+
+    /// <inheritdoc />
+    public Task<bool> IsDungeonMasterAsync(Guid campaignId, Guid userId, CancellationToken ct = default)
+    {
+        return _dbContext.Campaigns
+            .AsNoTracking()
+            .AnyAsync(c => c.Id == campaignId && c.DungeonMasterId == userId, ct);
+    }
+
     #endregion
 }
 

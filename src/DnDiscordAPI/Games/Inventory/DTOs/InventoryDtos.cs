@@ -32,5 +32,12 @@ namespace DnDiscordAPI.Games.Inventory.DTOs
 
         [Range(1, int.MaxValue)]
         public int Quantity { get; set; } = 1;
+
+        /// <summary>
+        /// Campaign the DM is acting within. Required so the API can verify the caller
+        /// is the DM of that campaign before granting the item.
+        /// </summary>
+        [Required]
+        public Guid CampaignId { get; set; }
     }
 }

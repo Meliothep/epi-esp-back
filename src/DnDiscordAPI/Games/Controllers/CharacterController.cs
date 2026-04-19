@@ -1,9 +1,9 @@
 ﻿using System.Security.Claims;
+using DnDiscord.Campaign.Services;
 using DnDiscordAPI.Games.Character.DTOs;
 using DnDiscordAPI.Games.Character.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.Security.Claims;
 
 namespace DnDiscordAPI.Games.Controllers
 {
@@ -13,10 +13,12 @@ namespace DnDiscordAPI.Games.Controllers
     public class CharacterController : ControllerBase
     {
         private readonly ICharacterService _characterService;
+        private readonly IUserContextService _userContext;
 
-        public CharacterController(ICharacterService characterService)
+        public CharacterController(ICharacterService characterService, IUserContextService userContext)
         {
             _characterService = characterService;
+            _userContext = userContext;
         }
 
         [HttpPost]
@@ -71,6 +73,9 @@ namespace DnDiscordAPI.Games.Controllers
         [HttpGet("{id}/wallet")]
         public async Task<ActionResult<WalletDto>> GetWallet(Guid id)
         {
+            if (!await IsOwnerAsync(id))
+                return Forbid();
+
             try
             {
                 var wallet = await _characterService.GetWalletAsync(id);
@@ -85,6 +90,9 @@ namespace DnDiscordAPI.Games.Controllers
         [HttpPatch("{id}/wallet")]
         public async Task<ActionResult<WalletDto>> ModifyWallet(Guid id, [FromBody] ModifyWalletRequest request)
         {
+            if (!await IsOwnerAsync(id))
+                return Forbid();
+
             try
             {
                 var wallet = await _characterService.ModifyWalletAsync(id, request);
@@ -94,6 +102,16 @@ namespace DnDiscordAPI.Games.Controllers
             {
                 return NotFound(new { error = ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Wallet and inventory self-management is restricted to the character's owner.
+        /// DM coin grants should go through a dedicated DM endpoint (out of scope for POC).
+        /// </summary>
+        private async Task<bool> IsOwnerAsync(Guid characterId)
+        {
+            var ownerDiscordId = await _characterService.GetOwnerDiscordIdAsync(characterId);
+            return ownerDiscordId != null && ownerDiscordId == _userContext.GetCurrentDiscordUserId();
         }
     }
 }
