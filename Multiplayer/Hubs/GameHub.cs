@@ -431,8 +431,17 @@ public class GameHub : Hub
                         assignment = BuildDefaultAssignment(player);
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    // Character lookup can fail for benign reasons (character was
+                    // deleted after the player joined the session) or for real
+                    // infrastructure reasons (DB timeout, misconfigured service).
+                    // Log the failure so a silent "everyone gets defaults" regression
+                    // is visible in telemetry, but still fall back to a default
+                    // assignment so the game can start.
+                    _logger.LogWarning(ex,
+                        "Character lookup failed for player {UserId} (characterId {CharacterId}); falling back to default assignment",
+                        player.UserId, player.SelectedCharacterId);
                     assignment = BuildDefaultAssignment(player, player.SelectedDefaultTemplate);
                 }
             }

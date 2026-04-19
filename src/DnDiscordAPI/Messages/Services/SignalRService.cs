@@ -61,7 +61,13 @@ namespace DnDiscordAPI.Messages.Services
         /// </summary>
         public async Task SendInventoryItemUsedAsync(string? sessionId, InventoryItemUsedEvent evt)
         {
-            if (string.IsNullOrEmpty(sessionId)) return;
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                _logger.LogDebug(
+                    "Skipping InventoryItemUsed broadcast for character {CharacterId}: no active session",
+                    evt.CharacterId);
+                return;
+            }
 
             try
             {

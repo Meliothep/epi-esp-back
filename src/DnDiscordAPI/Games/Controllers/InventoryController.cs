@@ -114,7 +114,8 @@ namespace DnDiscordAPI.Games.Controllers
         public async Task<IActionResult> UseEntry(
             Guid characterId,
             Guid entryId,
-            [FromQuery] Guid? campaignId)
+            [FromQuery] Guid? campaignId,
+            CancellationToken ct)
         {
             var ownerDiscordId = await _characterService.GetOwnerDiscordIdAsync(characterId);
             if (ownerDiscordId == null || ownerDiscordId != _userContext.GetCurrentDiscordUserId())
