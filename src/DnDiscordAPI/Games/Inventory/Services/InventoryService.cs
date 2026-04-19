@@ -4,6 +4,7 @@ using DnDiscordAPI.Games.Inventory.DTOs;
 using DnDiscordAPI.Games.Inventory.Models;
 using DnDiscordAPI.Messages.Services;
 using Microsoft.EntityFrameworkCore;
+using Multiplayer.Services;
 
 namespace DnDiscordAPI.Games.Inventory.Services
 {
@@ -12,7 +13,7 @@ namespace DnDiscordAPI.Games.Inventory.Services
         Task<List<ItemDto>> GetCatalogAsync();
         Task<List<InventoryEntryDto>> GetCharacterInventoryAsync(Guid characterId);
         Task<InventoryEntryDto> GiveItemAsync(Guid characterId, GiveItemRequest request);
-        Task RemoveEntryAsync(Guid characterId, Guid entryId);
+        Task RemoveEntryAsync(Guid characterId, Guid entryId, Guid? campaignId = null);
     }
 
     public class InventoryService : IInventoryService
@@ -20,17 +21,20 @@ namespace DnDiscordAPI.Games.Inventory.Services
         private readonly GamesDbContext _context;
         private readonly IMapper _mapper;
         private readonly SignalRService _signalR;
+        private readonly SessionManager _sessionManager;
         private readonly ILogger<InventoryService> _logger;
 
         public InventoryService(
             GamesDbContext context,
             IMapper mapper,
             SignalRService signalR,
+            SessionManager sessionManager,
             ILogger<InventoryService> logger)
         {
             _context = context;
             _mapper = mapper;
             _signalR = signalR;
+            _sessionManager = sessionManager;
             _logger = logger;
         }
 
@@ -65,10 +69,12 @@ namespace DnDiscordAPI.Games.Inventory.Services
                 .FirstOrDefaultAsync(e => e.CharacterId == characterId && e.ItemId == request.ItemId);
 
             InventoryEntry entry;
+            InventoryChangeAction action;
             if (existing != null)
             {
                 existing.Quantity += request.Quantity;
                 entry = existing;
+                action = InventoryChangeAction.Updated;
             }
             else
             {
@@ -81,15 +87,16 @@ namespace DnDiscordAPI.Games.Inventory.Services
                     Item = item,
                 };
                 _context.InventoryEntries.Add(entry);
+                action = InventoryChangeAction.Added;
             }
 
             await _context.SaveChangesAsync();
 
             var dto = _mapper.Map<InventoryEntryDto>(entry);
-            await _signalR.SendInventoryChangedAsync(new InventoryChangedEvent
+            await _signalR.SendInventoryChangedAsync(ResolveSessionId(request.CampaignId), new InventoryChangedEvent
             {
                 CharacterId = characterId,
-                Action = InventoryChangeAction.Added,
+                Action = action,
                 Entry = dto,
             });
 
@@ -97,12 +104,14 @@ namespace DnDiscordAPI.Games.Inventory.Services
             return dto;
         }
 
-        public async Task RemoveEntryAsync(Guid characterId, Guid entryId)
+        public async Task RemoveEntryAsync(Guid characterId, Guid entryId, Guid? campaignId = null)
         {
             var entry = await _context.InventoryEntries
                 .Include(e => e.Item)
                 .FirstOrDefaultAsync(e => e.Id == entryId && e.CharacterId == characterId)
                 ?? throw new KeyNotFoundException($"Inventory entry {entryId} not found for character {characterId}");
+
+            var sessionId = ResolveSessionId(campaignId);
 
             if (entry.Quantity > 1)
             {
@@ -110,7 +119,7 @@ namespace DnDiscordAPI.Games.Inventory.Services
                 await _context.SaveChangesAsync();
 
                 var updatedDto = _mapper.Map<InventoryEntryDto>(entry);
-                await _signalR.SendInventoryChangedAsync(new InventoryChangedEvent
+                await _signalR.SendInventoryChangedAsync(sessionId, new InventoryChangedEvent
                 {
                     CharacterId = characterId,
                     Action = InventoryChangeAction.Updated,
@@ -125,7 +134,7 @@ namespace DnDiscordAPI.Games.Inventory.Services
                 _context.InventoryEntries.Remove(entry);
                 await _context.SaveChangesAsync();
 
-                await _signalR.SendInventoryChangedAsync(new InventoryChangedEvent
+                await _signalR.SendInventoryChangedAsync(sessionId, new InventoryChangedEvent
                 {
                     CharacterId = characterId,
                     Action = InventoryChangeAction.Removed,
@@ -134,6 +143,22 @@ namespace DnDiscordAPI.Games.Inventory.Services
 
                 _logger.LogInformation("Removed inventory entry {Entry} from character {Character}", entryId, characterId);
             }
+        }
+
+        /// <summary>
+        /// Finds the SignalR group id for an active session tied to the campaign.
+        /// Returns null if no campaign id is known or no live session exists — the caller
+        /// will then skip the broadcast while the DB write still happens.
+        /// </summary>
+        private string? ResolveSessionId(Guid? campaignId)
+        {
+            if (!campaignId.HasValue) return null;
+
+            var session = _sessionManager
+                .GetSessionsByCampaign(campaignId.Value)
+                .FirstOrDefault();
+
+            return session?.SessionId;
         }
     }
 }

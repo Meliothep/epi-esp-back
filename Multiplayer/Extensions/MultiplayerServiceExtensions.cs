@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Multiplayer.Hubs;
 using Multiplayer.Services;
 
 namespace Multiplayer.Extensions;
@@ -14,6 +16,10 @@ public static class MultiplayerServiceExtensions
         services.AddSingleton<SessionManager>();
         services.AddSingleton<TurnManager>();
         services.AddSingleton<MessageSequencer>();
+
+        // Route Clients.User(...) through the Discord JWT sub claim so wallet broadcasts
+        // can be addressed to a specific player connection.
+        services.AddSingleton<IUserIdProvider, DiscordUserIdProvider>();
 
         // Nettoyage des sessions inactives en arrière-plan
         services.AddHostedService<SessionCleanupBackgroundService>();

@@ -230,7 +230,7 @@ namespace DnDiscordAPI.Games.Character.Services
 
             var dto = _mapper.Map<WalletDto>(character.Wallet);
 
-            await _signalR.SendWalletChangedAsync(characterId, dto);
+            await _signalR.SendWalletChangedAsync(character.DiscordUserId, characterId, dto);
 
             _logger.LogInformation(
                 "Wallet modified for character {Character}: CP={CP} PA={PA} PE={PE} PO={PO} PP={PP}",

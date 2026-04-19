@@ -97,7 +97,7 @@ namespace DnDiscordAPI.Games.Controllers
 
             try
             {
-                await _inventoryService.RemoveEntryAsync(characterId, entryId);
+                await _inventoryService.RemoveEntryAsync(characterId, entryId, campaignId);
                 return NoContent();
             }
             catch (KeyNotFoundException ex)
