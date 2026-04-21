@@ -51,8 +51,10 @@ public class UserContextService : IUserContextService
 
     /// <summary>
     /// Converts a Discord ID (string) to a deterministic Guid using MD5 hashing.
+    /// Public so that RGPD-level endpoints (suppression / export du compte)
+    /// utilisent exactement la même conversion que le reste du module Campaign.
     /// </summary>
-    private static Guid ConvertDiscordIdToGuid(string discordId)
+    public static Guid ConvertDiscordIdToGuid(string discordId)
     {
         using var md5 = MD5.Create();
         var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(discordId));

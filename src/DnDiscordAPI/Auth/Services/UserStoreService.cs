@@ -6,6 +6,7 @@ public interface IUserStore
 {
     User GetOrCreateUser(DiscordUserData discordUser);
     User? TryGetUser(string userId);
+    bool RemoveUser(string userId);
 }
 
 public class UserStoreService : IUserStore
@@ -39,5 +40,10 @@ public class UserStoreService : IUserStore
     public User? TryGetUser(string userId)
     {
         return Users.TryGetValue(userId, out var user) ? user : null;
+    }
+
+    public bool RemoveUser(string userId)
+    {
+        return Users.Remove(userId);
     }
 }
