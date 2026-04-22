@@ -22,6 +22,7 @@ public class GameHub : Hub
     private readonly ICharacterLookupService _characterLookup;
     private readonly IInventoryGrantService _inventoryGrant;
     private readonly ICampaignMapLookupService _mapLookup;
+    private readonly CombatManager _combatManager;
 
     /// <summary>
     /// Constructeur du GameHub
@@ -29,7 +30,7 @@ public class GameHub : Hub
     public GameHub(ILogger<GameHub> logger, SessionManager sessionManager, MessageSequencer messageSequencer,
         StateManager stateManager, IGameActionValidator validator, IUserContextService userContextService,
         ICharacterLookupService characterLookup, IInventoryGrantService inventoryGrant,
-        ICampaignMapLookupService mapLookup)
+        ICampaignMapLookupService mapLookup, CombatManager combatManager)
     {
         _logger = logger;
         _sessionManager = sessionManager;
@@ -40,6 +41,7 @@ public class GameHub : Hub
         _characterLookup = characterLookup;
         _inventoryGrant = inventoryGrant;
         _mapLookup = mapLookup;
+        _combatManager = combatManager;
     }
 
     /// <summary>
@@ -453,6 +455,30 @@ public class GameHub : Hub
             assignments.Add(assignment);
         }
 
+        // Seed server-authoritative combat state with the player roster. Phase stays
+        // FreeRoam — initiative is rolled only when DmStartCombat is called.
+        session.Combat.Units.Clear();
+        session.Combat.Phase = CombatPhase.FreeRoam;
+        session.Combat.TurnOrder.Clear();
+        session.Combat.CurrentUnitIndex = 0;
+        session.Combat.Round = 0;
+        session.Combat.Outcome = null;
+        foreach (var a in assignments)
+        {
+            session.Combat.Units[a.UnitId] = new UnitRuntimeState
+            {
+                UnitId = a.UnitId,
+                OwnerUserId = a.UserId,
+                Team = UnitTeam.Player,
+                Name = a.UnitName,
+                CurrentHp = a.CurrentHp,
+                MaxHp = a.MaxHp,
+                CurrentAp = 4,
+                MaxAp = 4,
+                Initiative = a.Initiative,
+            };
+        }
+
         var payload = new GameStartedPayload
         {
             MapId = mapId,
@@ -612,11 +638,57 @@ public class GameHub : Hub
         if (session.DmUserId != GetUserId())
             throw new HubException("Only the DM can start combat");
 
-        _logger.LogInformation("DM {UserId} started combat in session {SessionId}",
-            session.DmUserId, sessionId);
+        var result = await _combatManager.StartCombatAsync(session, session.Combat.Units.Values.ToList());
 
-        var message = _messageSequencer.CreateMessage(sessionId, "CombatStarted", new { sessionId });
+        _logger.LogInformation(
+            "DM {UserId} started combat in session {SessionId}: {UnitCount} units, first {CurrentUnit}",
+            session.DmUserId, sessionId, result.Units.Count, result.CurrentUnitId);
+
+        var payload = new CombatStartedPayload
+        {
+            Phase = result.Phase,
+            Round = result.Round,
+            CurrentUnitId = result.CurrentUnitId,
+            TurnOrder = result.TurnOrder,
+            Units = result.Units,
+            // Back-compat fields so legacy front handlers still parse:
+            InitiativeOrder = result.TurnOrder
+                .Select(id => new InitiativeEntry
+                {
+                    UnitId = id,
+                    Initiative = result.Units.FirstOrDefault(u => u.UnitId == id)?.Initiative ?? 0,
+                    ControllerId = result.Units.FirstOrDefault(u => u.UnitId == id)?.OwnerUserId ?? Guid.Empty,
+                })
+                .ToList(),
+        };
+
+        var message = _messageSequencer.CreateMessage(sessionId, "CombatStarted", payload);
         await Clients.Group(sessionId).SendAsync("CombatStarted", message);
+    }
+
+    /// <summary>
+    /// DM forcibly ends combat, returning the session to free roam on the same map.
+    /// Broadcasts <c>CombatEnded</c> so every client clears their turn state together.
+    /// Addresses BUG-O.
+    /// </summary>
+    public async Task DmEndCombat()
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId)
+            ?? throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+
+        if (session.DmUserId != GetUserId())
+            throw new HubException("Only the DM can end combat");
+
+        await _combatManager.EndCombatAsync(session);
+
+        _logger.LogInformation("DM {UserId} ended combat in session {SessionId}", GetUserId(), sessionId);
+
+        var payload = new CombatEndedPayload { Result = CombatResult.Fled, Rewards = new() };
+        var message = _messageSequencer.CreateMessage(sessionId, "CombatEnded", payload);
+        await Clients.Group(sessionId).SendAsync("CombatEnded", message);
     }
 
     /// <summary>
@@ -755,11 +827,33 @@ public class GameHub : Hub
         if (session.DmUserId != userId)
             throw new HubException("Only the DM can spawn units");
 
+        // Add to server state so initiative + turn order are correct. Stats are
+        // kept minimal for POC; the full StatsJson breakdown is parsed client-side
+        // for rendering. Spawning during combat appends the unit at the end of
+        // the current turn order — acts next round.
+        var runtime = new UnitRuntimeState
+        {
+            UnitId = payload.UnitId,
+            Team = UnitTeam.Enemy,
+            Name = payload.Name,
+            PositionX = payload.Target.X,
+            PositionY = payload.Target.Y,
+            CurrentHp = 10,
+            MaxHp = 10,
+            CurrentAp = 4,
+            MaxAp = 4,
+            Initiative = 0,
+        };
+        await _combatManager.SpawnUnitAsync(session, runtime);
+
         _logger.LogInformation("DM {UserId} spawned {UnitType} '{Name}' at ({X},{Y}) in session {SessionId}",
             userId, payload.UnitType, payload.Name, payload.Target.X, payload.Target.Y, sessionId);
 
+        // Broadcast to the full group (including the DM) so the new unit's
+        // turn-order slot is reflected on every client. Was OthersInGroup — that
+        // left the DM's client to guess whether the spawn succeeded.
         var message = _messageSequencer.CreateMessage(sessionId, "DmUnitSpawned", payload);
-        await Clients.OthersInGroup(sessionId).SendAsync("DmUnitSpawned", message);
+        await Clients.Group(sessionId).SendAsync("DmUnitSpawned", message);
     }
 
     #endregion
@@ -904,7 +998,24 @@ public class GameHub : Hub
         if (!validation.IsValid)
             throw new HubException(validation.ErrorMessage ?? validation.ErrorCode ?? "Cannot end turn");
 
-        var message = _messageSequencer.CreateMessage(sessionId, "TurnEnded", payload);
+        var advance = await _combatManager.EndTurnAsync(session, payload.UnitId);
+        if (advance == null)
+        {
+            _logger.LogWarning("EndTurn rejected by CombatManager for unit {UnitId} in session {SessionId}",
+                payload.UnitId, sessionId);
+            return;
+        }
+
+        var outgoing = new TurnEndedPayload
+        {
+            UnitId = payload.UnitId,
+            NextUnitId = advance.CurrentUnitId,
+            Phase = advance.Phase,
+            Round = advance.Round,
+            Outcome = advance.Outcome,
+        };
+
+        var message = _messageSequencer.CreateMessage(sessionId, "TurnEnded", outgoing);
         await Clients.Group(sessionId).SendAsync("TurnEnded", message);
     }
 
