@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 using System.Threading;
 using static Multiplayer.Define;
 
@@ -16,7 +17,10 @@ namespace Multiplayer.Models
         /// <summary>
         /// Per-session serialisation gate. CombatManager acquires this before
         /// mutating the state so overlapping hub invocations don't race.
+        /// [JsonIgnore] — SemaphoreSlim.AvailableWaitHandle.Handle is an IntPtr
+        /// which STJ can't serialise. Runtime-only concern, never goes on the wire.
         /// </summary>
+        [JsonIgnore]
         public SemaphoreSlim Lock { get; } = new(1, 1);
 
         public string? CurrentUnitId => TurnOrder.Count == 0
