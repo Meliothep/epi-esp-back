@@ -1,6 +1,8 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.RateLimiting;
 using Multiplayer.Extensions;
 using DnDiscord.Campaign;
 using DnDiscordAPI.Auth;
@@ -25,6 +27,43 @@ builder.Services.AddMultiplayerServices();
 builder.AddAuthServices();
 builder.AddGamesModule();
 builder.AddCampaignModule();
+
+// Rate limiting global léger pour le POC ; policies fines pour les
+// endpoints destructifs / coûteux RGPD (DELETE /me et GET /me/export).
+// Clé de partition : sub claim (per-user). Fallback : ip si non
+// authentifié, ce qui limite aussi le bruit anonymous.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy("rgpd-destructive", httpContext =>
+    {
+        var key = httpContext.User?.FindFirst("sub")?.Value
+            ?? httpContext.Connection.RemoteIpAddress?.ToString()
+            ?? "anon";
+        return RateLimitPartition.GetFixedWindowLimiter(key, _ =>
+            new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 3,
+                Window = TimeSpan.FromMinutes(10),
+                QueueLimit = 0,
+            });
+    });
+
+    options.AddPolicy("rgpd-export", httpContext =>
+    {
+        var key = httpContext.User?.FindFirst("sub")?.Value
+            ?? httpContext.Connection.RemoteIpAddress?.ToString()
+            ?? "anon";
+        return RateLimitPartition.GetFixedWindowLimiter(key, _ =>
+            new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(10),
+                QueueLimit = 0,
+            });
+    });
+});
 
 
 // CORS configuration
@@ -180,7 +219,11 @@ app.UseHttpsRedirection();
 
 // Auth pipeline
 app.UseAuthentication();
+// RGPD : bloque les JWT d'un compte supprimé avant de laisser la requête
+// atteindre l'autorisation + les actions (cf. TombstonedAccountMiddleware).
+app.UseMiddleware<DnDiscordAPI.Auth.TombstonedAccountMiddleware>();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapHub<GameHub>("/hubs/game").RequireCors("AllowFrontend");
 app.MapHub<MessageHub>("/hubs/messages").RequireCors("AllowFrontend");

@@ -1,11 +1,13 @@
+using DnDiscord.Campaign.Common;
 using DnDiscord.Campaign.DataAccess;
-using DnDiscord.Campaign.Services;
 using DnDiscordAPI.Auth.Services;
 using DnDiscordAPI.Games.Character.Repositories;
+using DnDiscordAPI.Games.Database;
 using DnDiscordAPI.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace DnDiscordAPI.Controllers;
@@ -22,6 +24,7 @@ public class AuthController : ControllerBase
     private readonly IUserStore _userStore;
     private readonly ICharacterRepository _characterRepository;
     private readonly CampaignDbContext _campaignDb;
+    private readonly GamesDbContext _gamesDb;
 
     public AuthController(
         IDiscordAuthService discordAuthService,
@@ -29,6 +32,7 @@ public class AuthController : ControllerBase
         IUserStore userStore,
         ICharacterRepository characterRepository,
         CampaignDbContext campaignDb,
+        GamesDbContext gamesDb,
         ILogger<AuthController> logger,
         IConfiguration configuration)
     {
@@ -37,6 +41,7 @@ public class AuthController : ControllerBase
         _userStore = userStore;
         _characterRepository = characterRepository;
         _campaignDb = campaignDb;
+        _gamesDb = gamesDb;
         _logger = logger;
         _configuration = configuration;
     }
@@ -126,6 +131,12 @@ public class AuthController : ControllerBase
 
             _logger.LogInformation($"[OAUTH] Successfully fetched Discord user: {discordUser.Username} ({discordUser.Id})");
 
+            // Révocation opportuniste du token d'accès Discord : on ne le
+            // persiste pas côté serveur, il n'a plus d'utilité après le
+            // fetch user data. Fire-and-forget (best-effort) pour ne pas
+            // bloquer la réponse du callback.
+            _ = _discordAuthService.RevokeAccessTokenAsync(discordAccessToken);
+
             // Create or update user in our system
             var user = _userStore.GetOrCreateUser(discordUser);
 
@@ -164,6 +175,16 @@ public class AuthController : ControllerBase
 
         if (string.IsNullOrEmpty(userId))
             return Unauthorized(new { error = "Invalid token" });
+
+        // Bloquer les JWT appartenant à un compte supprimé (RGPD art. 17).
+        // Sans ce garde, un token encore valide (TTL 7 jours) permettrait
+        // de recréer silencieusement le compte via reconstruction depuis
+        // les claims ci-dessous.
+        if (_userStore.IsDeleted(userId))
+        {
+            _logger.LogWarning("[AUTH_ME] Rejected token for deleted account {UserId}", userId);
+            return Unauthorized(new { error = "account_deleted" });
+        }
 
         // Try to get user from store (reconstruct if not found after restart)
         var user = _userStore.TryGetUser(userId);
@@ -223,52 +244,127 @@ public class AuthController : ControllerBase
     /// </summary>
     [Authorize]
     [HttpDelete("me")]
+    [EnableRateLimiting("rgpd-destructive")]
     public async Task<IActionResult> DeleteCurrentUser()
     {
         var discordId = User.FindFirst("sub")?.Value;
         if (string.IsNullOrEmpty(discordId))
             return Unauthorized(new { error = "Invalid token" });
 
-        var userGuid = UserContextService.ConvertDiscordIdToGuid(discordId);
+        var userGuid = DiscordIdMapping.ToGuid(discordId);
 
         _logger.LogInformation(
             "[RGPD_DELETE] Starting account deletion for Discord user {DiscordId} (guid {Guid})",
             discordId, userGuid);
 
+        // 1. Tombstone EN PREMIER : même si la suite échoue, les JWT encore
+        //    valides (TTL 7j) seront rejetés par GetCurrentUser. On évite
+        //    qu'un utilisateur reste "half-deleted" avec un token fonctionnel.
+        _userStore.RemoveUser(discordId);
+
+        int deletedCharacters = 0;
+        int deletedOwnedCampaigns = 0;
+        int deletedOrphanSessions = 0;
+        int deletedMemberships = 0;
+
+        // 2. Games DbContext (Characters) — transaction atomique wrappée
+        //    dans l'execution strategy (requis quand EnableRetryOnFailure).
         try
         {
-            // Characters (base Games)
-            var deletedCharacters = await _characterRepository.DeleteByUserIdAsync(discordId);
-
-            // Campagnes possédées — on ignore le query filter pour attraper
-            // aussi les campagnes soft-deleted que l'utilisateur aurait laissées.
-            // Cascade EF gère Snapshots / Members / GameSessions / SessionHistoryEntries.
-            var deletedOwnedCampaigns = await _campaignDb.Campaigns
-                .IgnoreQueryFilters()
-                .Where(c => c.DungeonMasterId == userGuid)
-                .ExecuteDeleteAsync();
-
-            // Memberships dans les campagnes d'autres DMs
-            var deletedMemberships = await _campaignDb.CampaignMembers
-                .Where(m => m.UserId == userGuid)
-                .ExecuteDeleteAsync();
-
-            // UserStore in-memory
-            _userStore.RemoveUser(discordId);
-
-            _logger.LogInformation(
-                "[RGPD_DELETE] Account deleted. characters={Characters}, ownedCampaigns={Campaigns}, memberships={Memberships}",
-                deletedCharacters, deletedOwnedCampaigns, deletedMemberships);
-
-            return NoContent();
+            var gamesStrategy = _gamesDb.Database.CreateExecutionStrategy();
+            await gamesStrategy.ExecuteAsync(async () =>
+            {
+                await using var gamesTx = await _gamesDb.Database.BeginTransactionAsync();
+                deletedCharacters = await _characterRepository.DeleteByUserIdAsync(discordId);
+                await gamesTx.CommitAsync();
+            });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex,
-                "[RGPD_DELETE] Failed to delete account for Discord user {DiscordId}",
+            _logger.LogCritical(ex,
+                "[RGPD_DELETE] Failed deleting Characters for {DiscordId}. Tombstone set, DB partial.",
                 discordId);
-            return StatusCode(500, new { error = "Account deletion failed", details = ex.Message });
+            return StatusCode(500, new
+            {
+                error = "account_deletion_partial",
+                stage = "characters",
+                tombstoned = true,
+            });
         }
+
+        // 3. Campaign DbContext — même pattern. Trois ExecuteDelete dans
+        //    une seule transaction : campagnes possédées (cascade EF vers
+        //    Snapshots / Members / GameSessions / SessionHistoryEntries),
+        //    sessions orphelines StartedBy dans les campagnes d'autrui,
+        //    memberships de l'utilisateur dans les campagnes d'autrui.
+        //
+        //    ⚠️ Note future-toi : ExecuteDeleteAsync court-circuite les
+        //    intercepteurs EF et les hooks SaveChanges. Si plus tard on
+        //    ajoute un audit interceptor ou des domain events sur la
+        //    suppression de Campaign/Character (ex. notifier les
+        //    participants en SignalR), il faudra soit fanout manuel AVANT
+        //    cet ExecuteDelete, soit basculer sur un load-then-Remove.
+        try
+        {
+            var campaignStrategy = _campaignDb.Database.CreateExecutionStrategy();
+            await campaignStrategy.ExecuteAsync(async () =>
+            {
+                await using var campaignTx = await _campaignDb.Database.BeginTransactionAsync();
+
+                deletedOwnedCampaigns = await _campaignDb.Campaigns
+                    .IgnoreQueryFilters()
+                    .Where(c => c.DungeonMasterId == userGuid)
+                    .ExecuteDeleteAsync();
+
+                // I3 : GameSessions lancées dans les campagnes d'AUTRES DMs
+                // (pas cascade-delete par le bloc ci-dessus). History entries
+                // partent en cascade EF.
+                deletedOrphanSessions = await _campaignDb.GameSessions
+                    .Where(s => s.StartedBy == userGuid)
+                    .ExecuteDeleteAsync();
+
+                deletedMemberships = await _campaignDb.CampaignMembers
+                    .Where(m => m.UserId == userGuid)
+                    .ExecuteDeleteAsync();
+
+                await campaignTx.CommitAsync();
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogCritical(ex,
+                "[RGPD_DELETE] Failed deleting Campaign data for {DiscordId}. characters={Characters} already deleted. Tombstone set.",
+                discordId, deletedCharacters);
+            return StatusCode(500, new
+            {
+                error = "account_deletion_partial",
+                stage = "campaigns",
+                tombstoned = true,
+                charactersDeleted = deletedCharacters,
+            });
+        }
+
+        // Log final de type audit : hash SHA-256 du DiscordId (anonymisé
+        // mais vérifiable à la demande), timestamp ISO-8601, counts par
+        // type d'entité. Tag [AUDIT_RGPD_DELETE] dédié pour que l'ops
+        // puisse configurer une rétention longue (2 ans) sur ce filtre
+        // Seq — répond à l'attente "preuve d'effacement" sans nécessiter
+        // de nouvelle table dans cette PR.
+        var discordIdHash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(discordId))).ToLowerInvariant();
+
+        _logger.LogInformation(
+            "[AUDIT_RGPD_DELETE] {EventType} at {TimestampUtc:o}, discordIdSha256={DiscordIdHash}, characters={Characters}, ownedCampaigns={OwnedCampaigns}, orphanSessions={OrphanSessions}, memberships={Memberships}",
+            "account_deletion_succeeded",
+            DateTime.UtcNow,
+            discordIdHash,
+            deletedCharacters,
+            deletedOwnedCampaigns,
+            deletedOrphanSessions,
+            deletedMemberships);
+
+        return NoContent();
     }
 
     /// <summary>
@@ -279,13 +375,14 @@ public class AuthController : ControllerBase
     /// </summary>
     [Authorize]
     [HttpGet("me/export")]
+    [EnableRateLimiting("rgpd-export")]
     public async Task<IActionResult> ExportCurrentUserData()
     {
         var discordId = User.FindFirst("sub")?.Value;
         if (string.IsNullOrEmpty(discordId))
             return Unauthorized(new { error = "Invalid token" });
 
-        var userGuid = UserContextService.ConvertDiscordIdToGuid(discordId);
+        var userGuid = DiscordIdMapping.ToGuid(discordId);
 
         var user = _userStore.TryGetUser(discordId) ?? new User
         {
@@ -299,25 +396,103 @@ public class AuthController : ControllerBase
 
         var characters = await _characterRepository.GetByUserIdAsync(discordId);
 
-        var ownedCampaigns = await _campaignDb.Campaigns
+        // RGPD art. 20 : n'exporter QUE les données fournies par la personne
+        // concernée. On ne doit pas leak les PII des autres joueurs/MJs :
+        //  - Snapshots.DataJson contient des données d'autres personnages
+        //    (noms, backgrounds, notes) → EXCLU du payload.
+        //  - Members d'autres utilisateurs dans les campagnes possédées :
+        //    UserId opaqué en hash (structure préservée sans ré-identification),
+        //    Nickname/Notes EXCLUS (informations identifiantes sur des tiers,
+        //    même si le MJ les a écrites, on ne redistribue pas via l'export).
+        var ownedCampaignsRaw = await _campaignDb.Campaigns
             .IgnoreQueryFilters()
             .Where(c => c.DungeonMasterId == userGuid)
             .Include(c => c.Members)
-            .Include(c => c.Snapshots)
             .Include(c => c.GameSessions)
             .AsNoTracking()
             .ToListAsync();
 
+        var ownedCampaigns = ownedCampaignsRaw.Select(c => new
+        {
+            c.Id,
+            c.Name,
+            c.Description,
+            c.Status,
+            c.CreatedAt,
+            c.UpdatedAt,
+            c.LastPlayedAt,
+            c.SettingsJson,
+            c.ImageUrl,
+            c.MaxPlayers,
+            c.IsPublic,
+            c.InviteCode,
+            c.CampaignTreeDefinition,
+            members = c.Members.Select(m => new
+            {
+                m.Id,
+                memberUserIdOpaque = HashForExport(m.UserId),
+                m.Role,
+                m.Status,
+                m.JoinedAt,
+                m.AcceptedAt,
+                // Nickname (choisi par le joueur) et Notes (écrites par le
+                // MJ sur le joueur) sont volontairement EXCLUS du payload :
+                // ce sont des informations identifiantes sur des tiers,
+                // et l'export RGPD du MJ ne doit pas servir de vecteur
+                // d'exfiltration (reviewer I1). Le MJ conserve l'accès à
+                // ces infos via l'interface du service.
+            }).ToList(),
+            gameSessions = c.GameSessions.Select(s => new
+            {
+                s.Id,
+                s.StartedAt,
+                s.EndedAt,
+                s.Status,
+                s.CurrentNodeId,
+                // StartedBy peut être un autre joueur → on opaque.
+                startedByOpaque = HashForExport(s.StartedBy),
+            }).ToList(),
+            // Snapshots.DataJson EXCLU volontairement (contient PII de tiers).
+            // Seules les métadonnées des snapshots sont exportées.
+            snapshots = _campaignDb.CampaignSnapshots
+                .Where(s => s.CampaignId == c.Id)
+                .AsNoTracking()
+                .Select(s => new
+                {
+                    s.Id,
+                    s.Label,
+                    s.Description,
+                    s.Version,
+                    s.Status,
+                    s.CreatedAt,
+                    createdByOpaque = HashForExport(s.CreatedBy),
+                })
+                .ToList(),
+        }).ToList();
+
         var memberships = await _campaignDb.CampaignMembers
             .Where(m => m.UserId == userGuid)
             .AsNoTracking()
+            .Select(m => new
+            {
+                m.Id,
+                m.CampaignId,
+                m.Role,
+                m.Status,
+                m.JoinedAt,
+                m.AcceptedAt,
+                m.Nickname,
+                m.Notes,
+            })
             .ToListAsync();
 
         var payload = new
         {
             exportedAt = DateTime.UtcNow,
-            schemaVersion = 1,
-            notice = "Export RGPD (art. 20). Données personnelles détenues par DnDiscord pour ce compte.",
+            schemaVersion = 2,
+            notice = "Export RGPD (art. 20). Contient uniquement les données fournies par vous. " +
+                     "Les contenus Snapshot.DataJson et les identifiants d'autres utilisateurs " +
+                     "sont volontairement exclus ou pseudonymisés.",
             profile = user,
             characters,
             ownedCampaigns,
@@ -331,8 +506,23 @@ public class AuthController : ControllerBase
         });
 
         var bytes = System.Text.Encoding.UTF8.GetBytes(json);
-        var filename = $"dndiscord-export-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json";
+        // S4 : filename avec millisecondes + prefix userGuid pour éviter
+        // la collision en cas de double clic dans la même seconde.
+        var filename = $"dndiscord-export-{userGuid.ToString()[..8]}-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}.json";
         return File(bytes, "application/json", filename);
+    }
+
+    /// <summary>
+    /// Opacifie un Guid pour l'export : hash SHA-256 tronqué. Préserve
+    /// l'intégrité structurelle (joindre entre snapshots / sessions /
+    /// members dans l'export) sans ré-identifier le tiers (irréversible).
+    /// </summary>
+    private static string HashForExport(Guid id)
+    {
+        if (id == Guid.Empty) return string.Empty;
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var hash = sha.ComputeHash(id.ToByteArray());
+        return Convert.ToHexString(hash)[..16].ToLowerInvariant();
     }
 
     /// <summary>

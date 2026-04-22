@@ -1,8 +1,7 @@
+using DnDiscord.Campaign.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace DnDiscord.Campaign.Services;
 
@@ -45,19 +44,16 @@ public class UserContextService : IUserContextService
             throw new UnauthorizedAccessException("User ID not found in token");
         }
 
-        // Convert Discord ID string to deterministic Guid using MD5 hash
-        return ConvertDiscordIdToGuid(discordId);
+        // Convert Discord ID string to deterministic Guid via shared helper.
+        return DiscordIdMapping.ToGuid(discordId);
     }
 
     /// <summary>
-    /// Converts a Discord ID (string) to a deterministic Guid using MD5 hashing.
-    /// Public so that RGPD-level endpoints (suppression / export du compte)
-    /// utilisent exactement la même conversion que le reste du module Campaign.
+    /// Alias rétro-compatible vers <see cref="DiscordIdMapping.ToGuid"/>.
+    /// Gardé pour ne pas casser les appels existants ; préférer
+    /// <c>DiscordIdMapping.ToGuid</c> dans les nouveaux callers.
     /// </summary>
+    [Obsolete("Utiliser DnDiscord.Campaign.Common.DiscordIdMapping.ToGuid à la place.")]
     public static Guid ConvertDiscordIdToGuid(string discordId)
-    {
-        using var md5 = MD5.Create();
-        var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(discordId));
-        return new Guid(hash);
-    }
+        => DiscordIdMapping.ToGuid(discordId);
 }
