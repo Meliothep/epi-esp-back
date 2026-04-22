@@ -184,4 +184,111 @@ public class CombatManagerTests
         Assert.Equal(CombatPhase.FreeRoam, session.Combat.Phase);
         Assert.Empty(session.Combat.TurnOrder);
     }
+
+    [Fact]
+    public async Task EndTurn_skips_dead_units_and_lands_on_next_alive()
+    {
+        var mgr = MakeManager();
+        var session = new GameSession { SessionId = "s1" };
+        await mgr.StartCombatAsync(session, new[]
+        {
+            Unit("p1", UnitTeam.Player, initiative: 30),
+            Unit("e1", UnitTeam.Enemy, initiative: 20),
+            Unit("e2", UnitTeam.Enemy, initiative: 10),
+        });
+        // Kill the next-in-line enemy; cursor should jump over it.
+        session.Combat.Units["e1"].CurrentHp = 0;
+
+        var result = await mgr.EndTurnAsync(session, "p1");
+
+        Assert.NotNull(result);
+        Assert.Equal("e2", result!.CurrentUnitId);
+    }
+
+    [Fact]
+    public async Task StartCombat_twice_resets_prior_roster_cleanly()
+    {
+        var mgr = MakeManager();
+        var session = new GameSession { SessionId = "s1" };
+        await mgr.StartCombatAsync(session, new[]
+        {
+            Unit("p1", UnitTeam.Player, initiative: 20),
+            Unit("e1", UnitTeam.Enemy, initiative: 10),
+        });
+        // Second call with a completely different roster (the Play Again case).
+        var result = await mgr.StartCombatAsync(session, new[]
+        {
+            Unit("p2", UnitTeam.Player, initiative: 15),
+            Unit("e2", UnitTeam.Enemy, initiative: 5),
+        });
+
+        Assert.DoesNotContain("p1", session.Combat.Units.Keys);
+        Assert.DoesNotContain("e1", session.Combat.Units.Keys);
+        Assert.Contains("p2", session.Combat.Units.Keys);
+        Assert.Contains("e2", session.Combat.Units.Keys);
+        Assert.Equal(1, result.Round);
+        Assert.Equal(2, result.TurnOrder.Count);
+    }
+
+    [Fact]
+    public async Task ApplyAttack_rejected_during_FreeRoam_phase()
+    {
+        var mgr = MakeManager();
+        var session = new GameSession { SessionId = "s1" };
+        // FreeRoam phase by default; seed units without StartCombat.
+        session.Combat.Units["p1"] = Unit("p1", UnitTeam.Player, hp: 10, ap: 4);
+        session.Combat.Units["e1"] = Unit("e1", UnitTeam.Enemy, hp: 10, ap: 4);
+
+        var result = await mgr.ApplyAttackAsync(session, "p1", "e1", damage: 5, apCost: 1);
+
+        Assert.Null(result);
+        Assert.Equal(10, session.Combat.Units["e1"].CurrentHp);
+    }
+
+    [Fact]
+    public async Task SpawnUnit_during_FreeRoam_does_not_touch_turn_order()
+    {
+        var mgr = MakeManager();
+        var session = new GameSession { SessionId = "s1" };
+
+        await mgr.SpawnUnitAsync(session, Unit("e1", UnitTeam.Enemy));
+
+        Assert.Contains("e1", session.Combat.Units.Keys);
+        Assert.Empty(session.Combat.TurnOrder);
+        Assert.Equal(CombatPhase.FreeRoam, session.Combat.Phase);
+    }
+
+    [Fact]
+    public async Task Determinism_same_seed_same_roster_produces_same_turn_order()
+    {
+        var seed = 99;
+        var roster = new[]
+        {
+            Unit("a", UnitTeam.Player, initiative: 10),
+            Unit("b", UnitTeam.Player, initiative: 15),
+            Unit("c", UnitTeam.Enemy, initiative: 12),
+        };
+
+        var m1 = MakeManager(seed);
+        var m2 = MakeManager(seed);
+        var s1 = new GameSession { SessionId = "s1" };
+        var s2 = new GameSession { SessionId = "s2" };
+
+        var r1 = await m1.StartCombatAsync(s1, roster.Select(u => CloneUnit(u)));
+        var r2 = await m2.StartCombatAsync(s2, roster.Select(u => CloneUnit(u)));
+
+        Assert.Equal(r1.TurnOrder, r2.TurnOrder);
+        Assert.Equal(r1.CurrentUnitId, r2.CurrentUnitId);
+    }
+
+    private static UnitRuntimeState CloneUnit(UnitRuntimeState u) => new()
+    {
+        UnitId = u.UnitId,
+        Team = u.Team,
+        CurrentHp = u.CurrentHp,
+        MaxHp = u.MaxHp,
+        CurrentAp = u.CurrentAp,
+        MaxAp = u.MaxAp,
+        Initiative = u.Initiative,
+    };
 }
