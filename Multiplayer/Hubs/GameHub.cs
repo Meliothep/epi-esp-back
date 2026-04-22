@@ -143,10 +143,29 @@ public class GameHub : Hub
             })
             .ToList();
 
+        // Resolve the map blob so the reconnecting client can actually render
+        // the board. Without this the front sits on "Setting up…" forever
+        // because GameStarted arrives with MapData = null.
+        string? mapData = null;
+        if (session.CampaignId is Guid campaignIdForMap
+            && !string.IsNullOrEmpty(session.MapId)
+            && Guid.TryParse(session.MapId, out var mapGuid))
+        {
+            try
+            {
+                var map = await _mapLookup.GetMapAsync(campaignIdForMap, mapGuid);
+                mapData = map?.Data;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Map lookup failed during rejoin for session {SessionId}", session.SessionId);
+            }
+        }
+
         await Clients.Caller.SendAsync("GameStarted", new GameStartedPayload
         {
             MapId = session.MapId ?? string.Empty,
-            MapData = null,
+            MapData = mapData,
             UnitAssignments = assignments,
         });
 
@@ -1125,6 +1144,9 @@ public class GameHub : Hub
             Phase = advance.Phase,
             Round = advance.Round,
             Outcome = advance.Outcome,
+            // Include the full unit roster so clients pick up AP reset on round
+            // wrap + HP / AP mutations that happened during the outgoing turn.
+            Units = session.Combat.Units.Values.ToList(),
         };
 
         var message = _messageSequencer.CreateMessage(sessionId, "TurnEnded", outgoing);

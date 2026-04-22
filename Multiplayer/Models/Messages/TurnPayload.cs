@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using static Multiplayer.Define;
+using Multiplayer.Models;
 
 namespace Multiplayer.Models.Messages
 {
@@ -31,6 +32,13 @@ namespace Multiplayer.Models.Messages
 
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public CombatResult? Outcome { get; set; }
+
+        /// <summary>
+        /// Full unit snapshot after the server advanced the cursor. Carries the
+        /// AP reset that fires when the round wraps — without this field clients
+        /// never see the refresh and AP stays at 0 forever.
+        /// </summary>
+        public List<UnitRuntimeState>? Units { get; set; }
     }
 
     /// <summary>
