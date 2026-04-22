@@ -958,10 +958,25 @@ public class GameHub : Hub
         if (session.DmUserId != userId)
             throw new HubException("Only the DM can spawn units");
 
-        // Add to server state so initiative + turn order are correct. Stats are
-        // kept minimal for POC; the full StatsJson breakdown is parsed client-side
-        // for rendering. Spawning during combat appends the unit at the end of
-        // the current turn order — acts next round.
+        // Parse HP / AP / initiative from the client-provided stats blob so the
+        // server's combat state matches what the DM sees on the board. Hard-coding
+        // HP=10 meant enemies got one-shot by mid-tier abilities.
+        int maxHp = 10, currentHp = 10, maxAp = 4, currentAp = 4, initiative = 0;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(payload.StatsJson);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("maxHealth", out var mh) && mh.TryGetInt32(out var mhVal)) maxHp = mhVal;
+            if (root.TryGetProperty("currentHealth", out var ch) && ch.TryGetInt32(out var chVal)) currentHp = chVal;
+            if (root.TryGetProperty("maxActionPoints", out var map) && map.TryGetInt32(out var mapVal)) maxAp = mapVal;
+            if (root.TryGetProperty("currentActionPoints", out var cap) && cap.TryGetInt32(out var capVal)) currentAp = capVal;
+            if (root.TryGetProperty("initiative", out var ini) && ini.TryGetInt32(out var iniVal)) initiative = iniVal;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "DmSpawnUnit: failed to parse statsJson for unit {UnitId}; using defaults", payload.UnitId);
+        }
+
         var runtime = new UnitRuntimeState
         {
             UnitId = payload.UnitId,
@@ -969,11 +984,11 @@ public class GameHub : Hub
             Name = payload.Name,
             PositionX = payload.Target.X,
             PositionY = payload.Target.Y,
-            CurrentHp = 10,
-            MaxHp = 10,
-            CurrentAp = 4,
-            MaxAp = 4,
-            Initiative = 0,
+            CurrentHp = currentHp,
+            MaxHp = maxHp,
+            CurrentAp = currentAp,
+            MaxAp = maxAp,
+            Initiative = initiative,
         };
         await _combatManager.SpawnUnitAsync(session, runtime);
 
@@ -1149,6 +1164,10 @@ public class GameHub : Hub
             Units = session.Combat.Units.Values.ToList(),
         };
 
+        _logger.LogInformation(
+            "EndTurn in session {SessionId}: {FromUnit} → {NextUnit} (phase {Phase}, round {Round}, outcome {Outcome})",
+            sessionId, payload.UnitId, advance.CurrentUnitId ?? "(none)", advance.Phase, advance.Round, advance.Outcome?.ToString() ?? "-");
+
         var message = _messageSequencer.CreateMessage(sessionId, "TurnEnded", outgoing);
         await Clients.Group(sessionId).SendAsync("TurnEnded", message);
     }
@@ -1166,7 +1185,7 @@ public class GameHub : Hub
 
         var message = _messageSequencer.CreateMessage(sessionId, "UnitMoved", payload);
 
-        _logger.LogDebug("Unit {UnitId} moved in session {SessionId}", payload.UnitId, sessionId);
+        _logger.LogInformation("Unit {UnitId} moved in session {SessionId}", payload.UnitId, sessionId);
 
         await Clients.OthersInGroup(sessionId).SendAsync("UnitMoved", message);
     }
@@ -1217,8 +1236,10 @@ public class GameHub : Hub
 
         var message = _messageSequencer.CreateMessage(sessionId, "AbilityUsed", payload);
 
-        _logger.LogDebug("Ability {AbilityId} used by unit {UnitId} in session {SessionId}",
-            payload.AbilityId, payload.UnitId, sessionId);
+        _logger.LogInformation("Ability {AbilityId} used by unit {UnitId} in session {SessionId} — {TargetCount} target(s), {TotalDamage} dmg",
+            payload.AbilityId, payload.UnitId, sessionId,
+            payload.Effects.Count,
+            payload.Effects.Sum(e => e.Value));
 
         await Clients.Group(sessionId).SendAsync("AbilityUsed", message);
     }
@@ -1237,7 +1258,7 @@ public class GameHub : Hub
 
         var message = _messageSequencer.CreateMessage(sessionId, "TurnEnded", payload);
 
-        _logger.LogDebug("Turn ended for unit {UnitId} in session {SessionId}",
+        _logger.LogInformation("Turn ended for unit {UnitId} in session {SessionId}",
             payload.UnitId, sessionId);
 
         await Clients.Group(sessionId).SendAsync("TurnEnded", message);
