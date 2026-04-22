@@ -66,7 +66,119 @@ public class GameHub : Hub
             timestamp = DateTime.UtcNow
         });
 
+        // Auto-rejoin: if this user was already a member of an active session
+        // (e.g. they just refreshed the page), re-place them into the SignalR
+        // group and push a snapshot so they come back to the same map + combat
+        // state without needing to repeat the invite/join flow. Closes BUG-R.
+        var existing = _sessionManager.FindSessionByUser(userId);
+        if (existing != null)
+        {
+            try
+            {
+                await SendRejoinSnapshotAsync(existing, userId, userName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Auto-rejoin failed for user {UserId} in session {SessionId}",
+                    userId, existing.SessionId);
+            }
+        }
+
         await base.OnConnectedAsync();
+    }
+
+    /// <summary>
+    /// Explicit client-initiated rejoin. Safe to call any time — idempotent.
+    /// Useful when the automatic rejoin in <see cref="OnConnectedAsync"/> missed
+    /// (e.g. race between JWT parse and session lookup) or the user needs a fresh
+    /// snapshot.
+    /// </summary>
+    public async Task<bool> RejoinSession()
+    {
+        var userId = GetUserId();
+        var userName = GetUserName();
+        var session = _sessionManager.FindSessionByUser(userId);
+        if (session == null) return false;
+
+        await SendRejoinSnapshotAsync(session, userId, userName);
+        return true;
+    }
+
+    private async Task SendRejoinSnapshotAsync(GameSession session, Guid userId, string userName)
+    {
+        // Re-associate the connection with the session + group membership.
+        _sessionManager.JoinSession(session.SessionId, userId, userName, Context.ConnectionId);
+        await Groups.AddToGroupAsync(Context.ConnectionId, session.SessionId);
+
+        // Notify peers that the player is back so their "disconnected" banners clear.
+        await Clients.OthersInGroup(session.SessionId).SendAsync("PlayerReconnected", new
+        {
+            userId,
+            userName,
+            timestamp = DateTime.UtcNow,
+        });
+
+        // Send SessionInfo so the caller's own player list is up to date.
+        await Clients.Caller.SendAsync("PlayerUpdated", MapToSessionInfo(session));
+
+        // If the game hasn't started yet there's nothing else to replay.
+        if (session.State != SessionState.InProgress) return;
+
+        // Replay GameStarted so the caller re-initialises the board with the
+        // current map + unit roster. The existing GameStarted handler on the
+        // front already routes through startGame() → initializeFreeRoam.
+        var assignments = session.Combat.Units.Values
+            .Where(u => u.Team == UnitTeam.Player || u.Team == UnitTeam.Ally)
+            .Select(u => new UnitAssignment
+            {
+                UserId = u.OwnerUserId ?? Guid.Empty,
+                UnitId = u.UnitId,
+                UnitName = u.Name,
+                MaxHp = u.MaxHp,
+                CurrentHp = u.CurrentHp,
+                Initiative = u.Initiative,
+                MovementRange = 6,
+                AttackRange = 1,
+            })
+            .ToList();
+
+        await Clients.Caller.SendAsync("GameStarted", new GameStartedPayload
+        {
+            MapId = session.MapId ?? string.Empty,
+            MapData = null,
+            UnitAssignments = assignments,
+        });
+
+        // If combat is active, replay CombatStarted so the caller picks up the
+        // turn order + current unit without re-rolling initiative. Resolved /
+        // FreeRoam phases are skipped — GameStarted above is enough.
+        if (session.Combat.Phase != CombatPhase.FreeRoam
+            && session.Combat.Phase != CombatPhase.Resolved
+            && session.Combat.TurnOrder.Count > 0)
+        {
+            var combatPayload = new CombatStartedPayload
+            {
+                Phase = session.Combat.Phase,
+                Round = session.Combat.Round,
+                CurrentUnitId = session.Combat.CurrentUnitId,
+                TurnOrder = session.Combat.TurnOrder.ToList(),
+                Units = session.Combat.Units.Values.ToList(),
+                InitiativeOrder = session.Combat.TurnOrder
+                    .Select(id => new InitiativeEntry
+                    {
+                        UnitId = id,
+                        Initiative = session.Combat.Units.TryGetValue(id, out var u) ? u.Initiative : 0,
+                        ControllerId = session.Combat.Units.TryGetValue(id, out var u2) ? (u2.OwnerUserId ?? Guid.Empty) : Guid.Empty,
+                    })
+                    .ToList(),
+            };
+            var message = _messageSequencer.CreateMessage(session.SessionId, "CombatStarted", combatPayload);
+            await Clients.Caller.SendAsync("CombatStarted", message);
+        }
+
+        _logger.LogInformation("Rejoined user {UserId} to session {SessionId} (phase {Phase})",
+            userId, session.SessionId, session.Combat.Phase);
     }
 
     /// <summary>

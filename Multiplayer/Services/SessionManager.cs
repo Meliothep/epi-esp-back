@@ -293,6 +293,25 @@ public class SessionManager
     }
 
     /// <summary>
+    /// Find the active session this user is a member of (connected or disconnected).
+    /// Used by the hub's reconnect path so a refreshed client can be re-placed
+    /// into its previous session without replaying the invite/join flow.
+    /// Returns null when the user has no active session.
+    /// </summary>
+    public GameSession? FindSessionByUser(Guid userId)
+    {
+        foreach (var session in _sessions.Values)
+        {
+            lock (session.Players)
+            {
+                if (session.Players.Any(p => p.UserId == userId))
+                    return session;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Créer une room standalone (sans campagne) pour le mode multijoueur libre.
     /// </summary>
     public GameSession CreateRoom(Guid hostUserId, string hostUserName, int maxPlayers)
