@@ -86,10 +86,12 @@ public class CampaignService : ICampaignService
         
         _dbContext.Campaigns.Add(campaign);
         await _dbContext.SaveChangesAsync(ct);
-        
+
         _logger.LogInformation("Created campaign {CampaignId} '{Name}'", campaign.Id, campaign.Name);
-        
-        return MapToDetailResponse(campaign);
+
+        var response = MapToDetailResponse(campaign);
+        response.IsDungeonMaster = true; // Creator is always the DM
+        return response;
     }
     
     /// <inheritdoc />
@@ -231,12 +233,14 @@ public class CampaignService : ICampaignService
         if (request.Status.HasValue) campaign.Status = request.Status.Value;
         
         campaign.UpdatedAt = DateTime.UtcNow;
-        
+
         await _dbContext.SaveChangesAsync(ct);
-        
+
         _logger.LogInformation("Updated campaign {CampaignId}", campaignId);
-        
-        return MapToDetailResponse(campaign);
+
+        var response = MapToDetailResponse(campaign);
+        response.IsDungeonMaster = campaign.DungeonMasterId == userId;
+        return response;
     }
     
     /// <inheritdoc />
