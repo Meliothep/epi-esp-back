@@ -32,6 +32,7 @@ namespace Multiplayer.Services
             await session.Combat.Lock.WaitAsync();
             try
             {
+                session.LastActivityAt = DateTime.UtcNow;
                 var combat = session.Combat;
                 combat.Units.Clear();
                 foreach (var u in units)
@@ -70,6 +71,7 @@ namespace Multiplayer.Services
             await session.Combat.Lock.WaitAsync();
             try
             {
+                session.LastActivityAt = DateTime.UtcNow;
                 var combat = session.Combat;
                 if (combat.Phase == CombatPhase.FreeRoam || combat.Phase == CombatPhase.Resolved)
                     return null;
@@ -122,6 +124,7 @@ namespace Multiplayer.Services
             await session.Combat.Lock.WaitAsync();
             try
             {
+                session.LastActivityAt = DateTime.UtcNow;
                 var combat = session.Combat;
                 if (!combat.Units.TryGetValue(unitId, out var unit)) return null;
 
@@ -151,6 +154,7 @@ namespace Multiplayer.Services
             await session.Combat.Lock.WaitAsync();
             try
             {
+                session.LastActivityAt = DateTime.UtcNow;
                 var combat = session.Combat;
                 if (combat.Phase == CombatPhase.Resolved || combat.Phase == CombatPhase.FreeRoam) return null;
                 if (combat.CurrentUnitId != attackerId) return null;
@@ -179,6 +183,7 @@ namespace Multiplayer.Services
             await session.Combat.Lock.WaitAsync();
             try
             {
+                session.LastActivityAt = DateTime.UtcNow;
                 var combat = session.Combat;
                 combat.Units[unit.UnitId] = unit;
                 if (combat.Phase != CombatPhase.FreeRoam && !combat.TurnOrder.Contains(unit.UnitId))
@@ -200,6 +205,7 @@ namespace Multiplayer.Services
             await session.Combat.Lock.WaitAsync();
             try
             {
+                session.LastActivityAt = DateTime.UtcNow;
                 var combat = session.Combat;
                 combat.Phase = CombatPhase.FreeRoam;
                 combat.TurnOrder.Clear();

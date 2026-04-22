@@ -1183,6 +1183,38 @@ public class GameHub : Hub
             throw new HubException("Not in a session");
         }
 
+        var session = _sessionManager.GetSession(sessionId);
+        if (session != null)
+        {
+            // Apply the payload's effects to server-side Combat state so the
+            // post-turn snapshot in TurnEnded.Units stays consistent with the
+            // damage the clients are showing. Without this, the next TurnEnded
+            // broadcast overwrites the attack's HP drop with the stale pre-attack
+            // server value.
+            await session.Combat.Lock.WaitAsync();
+            try
+            {
+                foreach (var effect in payload.Effects)
+                {
+                    if (!session.Combat.Units.TryGetValue(effect.TargetId, out var target)) continue;
+                    var kind = effect.Type?.ToLowerInvariant();
+                    var delta = kind == "heal" ? effect.Value : -effect.Value;
+                    target.CurrentHp = Math.Clamp(target.CurrentHp + delta, 0, target.MaxHp);
+                }
+                if (session.Combat.Units.TryGetValue(payload.UnitId, out var attacker))
+                {
+                    if (payload.ApCost > 0)
+                    {
+                        attacker.CurrentAp = Math.Max(0, attacker.CurrentAp - payload.ApCost);
+                    }
+                }
+            }
+            finally
+            {
+                session.Combat.Lock.Release();
+            }
+        }
+
         var message = _messageSequencer.CreateMessage(sessionId, "AbilityUsed", payload);
 
         _logger.LogDebug("Ability {AbilityId} used by unit {UnitId} in session {SessionId}",

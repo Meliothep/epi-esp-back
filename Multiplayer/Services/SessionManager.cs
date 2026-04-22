@@ -277,6 +277,14 @@ public class SessionManager
     public string? GetSessionByConnection(string connectionId)
     {
         _connectionToSession.TryGetValue(connectionId, out var sessionId);
+        // Touch the session's activity timestamp whenever it's resolved through
+        // the hub so the background cleanup can't evict a session mid-combat.
+        // Every hub command method calls this at entry, so this becomes the one
+        // central place that marks the session as "live".
+        if (sessionId != null && _sessions.TryGetValue(sessionId, out var session))
+        {
+            session.LastActivityAt = DateTime.UtcNow;
+        }
         return sessionId;
     }
 
@@ -479,8 +487,13 @@ public class SessionManager
         var now = DateTime.UtcNow;
         var toRemove = _sessions.Values
             .Where(s =>
-                (s.DmDisconnectedAt.HasValue && (now - s.DmDisconnectedAt.Value) >= dmDisconnectedThreshold) ||
-                (s.LastActivityAt < now - inactivityThreshold))
+                // Never evict a session while any player is currently connected —
+                // the LastActivityAt heuristic isn't enough when combat commands
+                // don't always touch it. An active websocket is the authoritative
+                // "still alive" signal.
+                s.Players.All(p => p.Status != Define.ConnectionStatus.Connected) &&
+                ((s.DmDisconnectedAt.HasValue && (now - s.DmDisconnectedAt.Value) >= dmDisconnectedThreshold) ||
+                 (s.LastActivityAt < now - inactivityThreshold)))
             .ToList();
 
         foreach (var session in toRemove)
