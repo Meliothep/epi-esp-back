@@ -16,8 +16,6 @@ public class GameHub : Hub
     private readonly ILogger<GameHub> _logger;
     private readonly SessionManager _sessionManager;
     private readonly MessageSequencer _messageSequencer;
-    private readonly StateManager _stateManager;
-    private readonly IGameActionValidator _validator;
     private readonly IUserContextService _userContextService;
     private readonly ICharacterLookupService _characterLookup;
     private readonly IInventoryGrantService _inventoryGrant;
@@ -28,15 +26,13 @@ public class GameHub : Hub
     /// Constructeur du GameHub
     /// </summary>
     public GameHub(ILogger<GameHub> logger, SessionManager sessionManager, MessageSequencer messageSequencer,
-        StateManager stateManager, IGameActionValidator validator, IUserContextService userContextService,
+        IUserContextService userContextService,
         ICharacterLookupService characterLookup, IInventoryGrantService inventoryGrant,
         ICampaignMapLookupService mapLookup, CombatManager combatManager)
     {
         _logger = logger;
         _sessionManager = sessionManager;
         _messageSequencer = messageSequencer;
-        _stateManager = stateManager;
-        _validator = validator;
         _userContextService = userContextService;
         _characterLookup = characterLookup;
         _inventoryGrant = inventoryGrant;
@@ -1017,126 +1013,6 @@ public class GameHub : Hub
     #region [== Messages de jeu ==]
 
     /// <summary>
-    /// Déplacement autorisé par le serveur. Valide puis diffuse MoveResult à la session.
-    /// </summary>
-    public async Task<MoveResult> Move(MoveRequest request)
-    {
-        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
-        if (sessionId == null)
-            throw new HubException("Not in a session");
-
-        var session = _sessionManager.GetSession(sessionId);
-        if (session == null)
-            throw new HubException("Session not found");
-
-        var userId = GetUserId();
-        var validation = _validator.ValidateMove(session, request, userId);
-        if (!validation.IsValid)
-        {
-            return new MoveResult
-            {
-                UnitId = request.UnitId,
-                Success = false,
-                Error = validation.ErrorMessage ?? validation.ErrorCode
-            };
-        }
-
-        var result = new MoveResult
-        {
-            UnitId = request.UnitId,
-            Path = request.Path ?? new List<GridPosition>(),
-            ApCost = 1,
-            Success = true
-        };
-
-        var message = _messageSequencer.CreateMessage(sessionId, "UnitMoved", result);
-        await Clients.Group(sessionId).SendAsync("UnitMoved", message);
-        return result;
-    }
-
-    /// <summary>
-    /// Attaque autorisée par le serveur. Valide puis diffuse AttackResult à la session.
-    /// </summary>
-    public async Task<AttackResult> Attack(AttackRequest request)
-    {
-        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
-        if (sessionId == null)
-            throw new HubException("Not in a session");
-
-        var session = _sessionManager.GetSession(sessionId);
-        if (session == null)
-            throw new HubException("Session not found");
-
-        var userId = GetUserId();
-        var validation = _validator.ValidateAttack(session, request, userId);
-        if (!validation.IsValid)
-        {
-            return new AttackResult
-            {
-                AttackerId = request.AttackerId,
-                TargetId = request.TargetId,
-                AbilityId = request.AbilityId,
-                Success = false,
-                Error = validation.ErrorMessage ?? validation.ErrorCode
-            };
-        }
-
-        var result = new AttackResult
-        {
-            AttackerId = request.AttackerId,
-            TargetId = request.TargetId,
-            AbilityId = request.AbilityId,
-            DiceRoll = 0,
-            Modifier = 0,
-            Hit = true,
-            Damage = null,
-            Success = true
-        };
-
-        var message = _messageSequencer.CreateMessage(sessionId, "AttackResolved", result);
-        await Clients.Group(sessionId).SendAsync("AttackResolved", message);
-        return result;
-    }
-
-    /// <summary>
-    /// Utilisation de capacité autorisée par le serveur. Valide puis diffuse UseAbilityResult à la session.
-    /// </summary>
-    public async Task<UseAbilityResult> UseAbility(UseAbilityRequest request)
-    {
-        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
-        if (sessionId == null)
-            throw new HubException("Not in a session");
-
-        var session = _sessionManager.GetSession(sessionId);
-        if (session == null)
-            throw new HubException("Session not found");
-
-        var userId = GetUserId();
-        var validation = _validator.ValidateAbility(session, request, userId);
-        if (!validation.IsValid)
-        {
-            return new UseAbilityResult
-            {
-                UnitId = request.UnitId,
-                AbilityId = request.AbilityId,
-                Success = false,
-                Error = validation.ErrorMessage ?? validation.ErrorCode
-            };
-        }
-
-        var result = new UseAbilityResult
-        {
-            UnitId = request.UnitId,
-            AbilityId = request.AbilityId,
-            Success = true
-        };
-
-        var message = _messageSequencer.CreateMessage(sessionId, "AbilityUsed", result);
-        await Clients.Group(sessionId).SendAsync("AbilityUsed", message);
-        return result;
-    }
-
-    /// <summary>
     /// Terminer le tour en cours. Valide puis diffuse TurnEnded à la session.
     /// </summary>
     public async Task EndTurn(TurnEndedPayload payload)
@@ -1150,9 +1026,8 @@ public class GameHub : Hub
             throw new HubException("Session not found");
 
         var userId = GetUserId();
-        var validation = _validator.ValidateTurnEnd(session, userId);
-        if (!validation.IsValid)
-            throw new HubException(validation.ErrorMessage ?? validation.ErrorCode ?? "Cannot end turn");
+        if (!CanControlUnit(session, payload.UnitId, userId))
+            throw new HubException("You do not control that unit");
 
         var advance = await _combatManager.EndTurnAsync(session, payload.UnitId);
         if (advance == null)
@@ -1286,97 +1161,6 @@ public class GameHub : Hub
             payload.Effects.Sum(e => e.Value));
 
         await Clients.Group(sessionId).SendAsync("AbilityUsed", message);
-    }
-
-    /// <summary>
-    /// Terminer le tour d'une unité
-    /// <paramref name="payload"/>
-    /// </summary>
-    public async Task SendEndTurn(TurnEndedPayload payload)
-    {
-        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
-        if (sessionId == null) throw new HubException("Not in a session");
-
-        var session = _sessionManager.GetSession(sessionId)
-            ?? throw new HubException("Session not found");
-
-        var userId = GetUserId();
-        if (!CanControlUnit(session, payload.UnitId, userId))
-            throw new HubException("You do not control that unit");
-
-        // Route through CombatManager so the server actually advances the cursor
-        // and detects Victory/Defeat. Previously this method was a pure relay —
-        // a malicious client could fabricate a TurnEnded event and broadcast it
-        // to the group with any NextUnitId / Phase / Round / Outcome they chose.
-        var advance = await _combatManager.EndTurnAsync(session, payload.UnitId);
-        if (advance == null)
-        {
-            _logger.LogWarning("SendEndTurn rejected by CombatManager for unit {UnitId} in session {SessionId}",
-                payload.UnitId, sessionId);
-            return;
-        }
-
-        var outgoing = new TurnEndedPayload
-        {
-            UnitId = payload.UnitId,
-            NextUnitId = advance.CurrentUnitId,
-            Phase = advance.Phase,
-            Round = advance.Round,
-            Outcome = advance.Outcome,
-            Units = session.Combat.Units.Values.ToList(),
-        };
-
-        var message = _messageSequencer.CreateMessage(sessionId, "TurnEnded", outgoing);
-
-        _logger.LogInformation("Turn ended for unit {UnitId} in session {SessionId}",
-            payload.UnitId, sessionId);
-
-        await Clients.Group(sessionId).SendAsync("TurnEnded", message);
-    }
-
-    /// <summary>
-    /// Envoyer un snapshot complet de l'état du jeu (stocké côté serveur pour RequestFullState). E2.3.
-    /// </summary>
-    public async Task SendGameStateSnapshot(GameStateSnapshot snapshot)
-    {
-        // DM-only. Previously any session member could push an arbitrary
-        // GameStateSnapshot into StateManager which was then served back to
-        // late-joiners via RequestFullState — a state-injection vector. Since
-        // the rework replaced state-on-reconnect with the server-computed
-        // RejoinSession snapshot, this path is unused in production; gated
-        // here as defense-in-depth rather than removed outright.
-        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
-        if (sessionId == null) throw new HubException("Not in a session");
-
-        var session = _sessionManager.GetSession(sessionId)
-            ?? throw new HubException("Session not found");
-
-        if (session.DmUserId != GetUserId())
-            throw new HubException("Only the DM can push state snapshots");
-
-        _stateManager.SetSnapshot(sessionId, snapshot);
-
-        var message = _messageSequencer.CreateMessage(sessionId, "GameStateSnapshot", snapshot);
-        _logger.LogDebug("Game state snapshot stored and sent to session {SessionId}", sessionId);
-        await Clients.Caller.SendAsync("GameStateSnapshot", message);
-    }
-
-    /// <summary>
-    /// Requête de l'état complet du jeu pour la session en cours (e.g. on reconnect ou late join).
-    /// Retourne le dernier snapshot stocké par SendGameStateSnapshot, ou un snapshot vide si aucun.
-    /// </summary>
-    public async Task<GameMessage<GameStateSnapshot>> RequestFullState()
-    {
-        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
-        if (sessionId == null)
-            throw new HubException("Not in a session");
-
-        var snapshot = _stateManager.GetSnapshot(sessionId)
-            ?? new GameStateSnapshot { SessionId = sessionId };
-
-        var message = _messageSequencer.CreateMessage(sessionId, "FullStateSync", snapshot);
-        await Clients.Caller.SendAsync("FullStateSync", message);
-        return message;
     }
 
     #endregion

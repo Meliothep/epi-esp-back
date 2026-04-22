@@ -11,13 +11,11 @@ public class SessionManager
     private readonly ConcurrentDictionary<string, string> _connectionToSession = new(); // ConnectionId -> SessionId
     private readonly ConcurrentDictionary<string, string> _joinCodeToSession = new(); // JoinCode -> SessionId
     private readonly ILogger<SessionManager> _logger;
-    private readonly StateManager _stateManager;
     private readonly MessageSequencer _messageSequencer;
 
-    public SessionManager(ILogger<SessionManager> logger, StateManager stateManager, MessageSequencer messageSequencer)
+    public SessionManager(ILogger<SessionManager> logger, MessageSequencer messageSequencer)
     {
         _logger = logger;
-        _stateManager = stateManager;
         _messageSequencer = messageSequencer;
     }
 
@@ -171,7 +169,6 @@ public class SessionManager
                     _sessions.TryRemove(sessionId, out _);
                     if (!string.IsNullOrWhiteSpace(session.JoinCode))
                         _joinCodeToSession.TryRemove(session.JoinCode, out _);
-                    _stateManager.RemoveSnapshot(sessionId);
                     _messageSequencer.ResetSequence(sessionId);
                     _logger.LogInformation("Session {SessionId} removed (no players left)", sessionId);
                 }
@@ -249,7 +246,6 @@ public class SessionManager
                 _sessions.TryRemove(sessionId, out _);
                 if (!string.IsNullOrWhiteSpace(session.JoinCode))
                     _joinCodeToSession.TryRemove(session.JoinCode, out _);
-                _stateManager.RemoveSnapshot(sessionId);
                 _messageSequencer.ResetSequence(sessionId);
                 _logger.LogInformation("Session {SessionId} removed (no players left after kick)", sessionId);
             }
@@ -464,7 +460,6 @@ public class SessionManager
             _sessions.TryRemove(session.SessionId, out _);
             if (!string.IsNullOrWhiteSpace(session.JoinCode))
                 _joinCodeToSession.TryRemove(session.JoinCode, out _);
-            _stateManager.RemoveSnapshot(session.SessionId);
             _messageSequencer.ResetSequence(session.SessionId);
             foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
                 _connectionToSession.TryRemove(p.ConnectionId!, out _);
@@ -501,7 +496,6 @@ public class SessionManager
             _sessions.TryRemove(session.SessionId, out _);
             if (!string.IsNullOrWhiteSpace(session.JoinCode))
                 _joinCodeToSession.TryRemove(session.JoinCode, out _);
-            _stateManager.RemoveSnapshot(session.SessionId);
             _messageSequencer.ResetSequence(session.SessionId);
             foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
                 _connectionToSession.TryRemove(p.ConnectionId!, out _);

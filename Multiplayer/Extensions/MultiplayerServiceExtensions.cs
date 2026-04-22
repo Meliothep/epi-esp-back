@@ -11,8 +11,6 @@ public static class MultiplayerServiceExtensions
         this IServiceCollection services)
     {
         // Services Singleton (thread-safe)
-        services.AddSingleton<StateManager>();
-        services.AddSingleton<IGameActionValidator, GameActionValidator>();
         services.AddSingleton<SessionManager>();
         services.AddSingleton<TurnManager>();
         services.AddSingleton<CombatManager>();
