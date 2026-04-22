@@ -588,26 +588,36 @@ public class GameHub : Hub
 
         // Seed server-authoritative combat state with the player roster. Phase stays
         // FreeRoam — initiative is rolled only when DmStartCombat is called.
-        session.Combat.Units.Clear();
-        session.Combat.Phase = CombatPhase.FreeRoam;
-        session.Combat.TurnOrder.Clear();
-        session.Combat.CurrentUnitIndex = 0;
-        session.Combat.Round = 0;
-        session.Combat.Outcome = null;
-        foreach (var a in assignments)
+        // Lock-guarded so a concurrent EndTurnAsync / DmStartCombat can't race
+        // with the reset.
+        await session.Combat.Lock.WaitAsync();
+        try
         {
-            session.Combat.Units[a.UnitId] = new UnitRuntimeState
+            session.Combat.Units.Clear();
+            session.Combat.Phase = CombatPhase.FreeRoam;
+            session.Combat.TurnOrder.Clear();
+            session.Combat.CurrentUnitIndex = 0;
+            session.Combat.Round = 0;
+            session.Combat.Outcome = null;
+            foreach (var a in assignments)
             {
-                UnitId = a.UnitId,
-                OwnerUserId = a.UserId,
-                Team = UnitTeam.Player,
-                Name = a.UnitName,
-                CurrentHp = a.CurrentHp,
-                MaxHp = a.MaxHp,
-                CurrentAp = 4,
-                MaxAp = 4,
-                Initiative = a.Initiative,
-            };
+                session.Combat.Units[a.UnitId] = new UnitRuntimeState
+                {
+                    UnitId = a.UnitId,
+                    OwnerUserId = a.UserId,
+                    Team = UnitTeam.Player,
+                    Name = a.UnitName,
+                    CurrentHp = a.CurrentHp,
+                    MaxHp = a.MaxHp,
+                    CurrentAp = 4,
+                    MaxAp = 4,
+                    Initiative = a.Initiative,
+                };
+            }
+        }
+        finally
+        {
+            session.Combat.Lock.Release();
         }
 
         var payload = new GameStartedPayload
@@ -1178,10 +1188,17 @@ public class GameHub : Hub
     public async Task SendUnitMove(UnitMovedPayload payload)
     {
         var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
-        if (sessionId == null)
-        {
-            throw new HubException("Not in a session");
-        }
+        if (sessionId == null) throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+
+        var userId = GetUserId();
+        if (!CanControlUnit(session, payload.UnitId, userId))
+            throw new HubException("You do not control that unit");
+
+        if (!IsLegalCombatAction(session, payload.UnitId))
+            throw new HubException("Unit cannot move right now");
 
         var message = _messageSequencer.CreateMessage(sessionId, "UnitMoved", payload);
 
@@ -1191,47 +1208,74 @@ public class GameHub : Hub
     }
 
     /// <summary>
+    /// Authority check — the caller (via their userId) is allowed to issue commands
+    /// for the given unit. DM can control any unit; players can only control units
+    /// whose <see cref="UnitRuntimeState.OwnerUserId"/> matches their userId.
+    /// Returns false when the unit isn't tracked on the server at all.
+    /// </summary>
+    private static bool CanControlUnit(GameSession session, string unitId, Guid userId)
+    {
+        if (!session.Combat.Units.TryGetValue(unitId, out var unit)) return false;
+        if (session.DmUserId == userId) return true;
+        return unit.OwnerUserId == userId;
+    }
+
+    /// <summary>
+    /// Phase legality — in FreeRoam anything goes. During active combat the unit
+    /// must be the current one in the turn order. Resolved combat blocks everything.
+    /// </summary>
+    private static bool IsLegalCombatAction(GameSession session, string unitId)
+    {
+        if (session.Combat.Phase == CombatPhase.FreeRoam) return true;
+        if (session.Combat.Phase == CombatPhase.Resolved) return false;
+        return session.Combat.CurrentUnitId == unitId;
+    }
+
+    /// <summary>
     /// Envoyer l'utilisation d'une capacité
     /// <paramref name="payload"/>
     /// </summary>
     public async Task SendAbilityUsed(AbilityUsedPayload payload)
     {
         var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
-        if (sessionId == null)
-        {
-            throw new HubException("Not in a session");
-        }
+        if (sessionId == null) throw new HubException("Not in a session");
 
-        var session = _sessionManager.GetSession(sessionId);
-        if (session != null)
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+
+        var userId = GetUserId();
+        if (!CanControlUnit(session, payload.UnitId, userId))
+            throw new HubException("You do not control that unit");
+
+        if (!IsLegalCombatAction(session, payload.UnitId))
+            throw new HubException("Unit cannot act right now");
+
+        // Apply the payload's effects to server-side Combat state so the
+        // post-turn snapshot in TurnEnded.Units stays consistent with the
+        // damage the clients are showing. Without this, the next TurnEnded
+        // broadcast overwrites the attack's HP drop with the stale pre-attack
+        // server value.
+        await session.Combat.Lock.WaitAsync();
+        try
         {
-            // Apply the payload's effects to server-side Combat state so the
-            // post-turn snapshot in TurnEnded.Units stays consistent with the
-            // damage the clients are showing. Without this, the next TurnEnded
-            // broadcast overwrites the attack's HP drop with the stale pre-attack
-            // server value.
-            await session.Combat.Lock.WaitAsync();
-            try
+            foreach (var effect in payload.Effects)
             {
-                foreach (var effect in payload.Effects)
+                if (!session.Combat.Units.TryGetValue(effect.TargetId, out var target)) continue;
+                var kind = effect.Type?.ToLowerInvariant();
+                var delta = kind == "heal" ? effect.Value : -effect.Value;
+                target.CurrentHp = Math.Clamp(target.CurrentHp + delta, 0, target.MaxHp);
+            }
+            if (session.Combat.Units.TryGetValue(payload.UnitId, out var attacker))
+            {
+                if (payload.ApCost > 0)
                 {
-                    if (!session.Combat.Units.TryGetValue(effect.TargetId, out var target)) continue;
-                    var kind = effect.Type?.ToLowerInvariant();
-                    var delta = kind == "heal" ? effect.Value : -effect.Value;
-                    target.CurrentHp = Math.Clamp(target.CurrentHp + delta, 0, target.MaxHp);
-                }
-                if (session.Combat.Units.TryGetValue(payload.UnitId, out var attacker))
-                {
-                    if (payload.ApCost > 0)
-                    {
-                        attacker.CurrentAp = Math.Max(0, attacker.CurrentAp - payload.ApCost);
-                    }
+                    attacker.CurrentAp = Math.Max(0, attacker.CurrentAp - payload.ApCost);
                 }
             }
-            finally
-            {
-                session.Combat.Lock.Release();
-            }
+        }
+        finally
+        {
+            session.Combat.Lock.Release();
         }
 
         var message = _messageSequencer.CreateMessage(sessionId, "AbilityUsed", payload);
@@ -1251,12 +1295,38 @@ public class GameHub : Hub
     public async Task SendEndTurn(TurnEndedPayload payload)
     {
         var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
-        if (sessionId == null)
+        if (sessionId == null) throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+
+        var userId = GetUserId();
+        if (!CanControlUnit(session, payload.UnitId, userId))
+            throw new HubException("You do not control that unit");
+
+        // Route through CombatManager so the server actually advances the cursor
+        // and detects Victory/Defeat. Previously this method was a pure relay —
+        // a malicious client could fabricate a TurnEnded event and broadcast it
+        // to the group with any NextUnitId / Phase / Round / Outcome they chose.
+        var advance = await _combatManager.EndTurnAsync(session, payload.UnitId);
+        if (advance == null)
         {
-            throw new HubException("Not in a session");
+            _logger.LogWarning("SendEndTurn rejected by CombatManager for unit {UnitId} in session {SessionId}",
+                payload.UnitId, sessionId);
+            return;
         }
 
-        var message = _messageSequencer.CreateMessage(sessionId, "TurnEnded", payload);
+        var outgoing = new TurnEndedPayload
+        {
+            UnitId = payload.UnitId,
+            NextUnitId = advance.CurrentUnitId,
+            Phase = advance.Phase,
+            Round = advance.Round,
+            Outcome = advance.Outcome,
+            Units = session.Combat.Units.Values.ToList(),
+        };
+
+        var message = _messageSequencer.CreateMessage(sessionId, "TurnEnded", outgoing);
 
         _logger.LogInformation("Turn ended for unit {UnitId} in session {SessionId}",
             payload.UnitId, sessionId);
@@ -1269,9 +1339,20 @@ public class GameHub : Hub
     /// </summary>
     public async Task SendGameStateSnapshot(GameStateSnapshot snapshot)
     {
+        // DM-only. Previously any session member could push an arbitrary
+        // GameStateSnapshot into StateManager which was then served back to
+        // late-joiners via RequestFullState — a state-injection vector. Since
+        // the rework replaced state-on-reconnect with the server-computed
+        // RejoinSession snapshot, this path is unused in production; gated
+        // here as defense-in-depth rather than removed outright.
         var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
-        if (sessionId == null)
-            throw new HubException("Not in a session");
+        if (sessionId == null) throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+
+        if (session.DmUserId != GetUserId())
+            throw new HubException("Only the DM can push state snapshots");
 
         _stateManager.SetSnapshot(sessionId, snapshot);
 
