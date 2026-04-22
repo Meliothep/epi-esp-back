@@ -15,6 +15,7 @@ public static class MultiplayerServiceExtensions
         services.AddSingleton<IGameActionValidator, GameActionValidator>();
         services.AddSingleton<SessionManager>();
         services.AddSingleton<TurnManager>();
+        services.AddSingleton<CombatManager>();
         services.AddSingleton<MessageSequencer>();
 
         // Route Clients.User(...) through the Discord JWT sub claim so wallet broadcasts
