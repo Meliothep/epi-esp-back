@@ -52,13 +52,6 @@ public abstract class IntegrationFixture<TEntryPoint> : IAsyncLifetime where TEn
                 builder.UseSetting("Discord:ClientSecret", "test-client-secret");
                 builder.UseSetting("Discord:RedirectUri", "http://localhost/auth/callback");
 
-                // DiscordAuthService valide sa config dans son ctor → fournir
-                // des valeurs factices pour permettre la résolution DI même
-                // dans les tests qui ne touchent pas à l'auth Discord.
-                builder.UseSetting("Discord:ClientId", "test-client-id");
-                builder.UseSetting("Discord:ClientSecret", "test-client-secret");
-                builder.UseSetting("Discord:RedirectUri", "http://localhost/auth/callback");
-
                 builder.ConfigureTestServices(services =>
                 {
                     // Replace DbContext registrations to ensure Testcontainer connection

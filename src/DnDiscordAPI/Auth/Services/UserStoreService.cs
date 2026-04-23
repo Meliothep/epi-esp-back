@@ -41,10 +41,11 @@ public class UserStoreService : IUserStore
     {
         // Refuse de re-créer un compte supprimé : l'utilisateur doit
         // re-consentir explicitement après une révocation Discord.
+        // Type dédié pour que DiscordCallback puisse renvoyer un 410 Gone
+        // actionnable au lieu d'un 500 opaque (reviewer N2).
         if (Tombstones.ContainsKey(discordUser.Id))
         {
-            throw new InvalidOperationException(
-                $"Account {discordUser.Id} has been deleted (RGPD erasure). Cannot recreate.");
+            throw new DnDiscordAPI.Auth.AccountTombstonedException(discordUser.Id);
         }
 
         return Users.AddOrUpdate(

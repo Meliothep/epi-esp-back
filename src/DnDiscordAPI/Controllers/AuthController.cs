@@ -1,5 +1,6 @@
 using DnDiscord.Campaign.Common;
 using DnDiscord.Campaign.DataAccess;
+using DnDiscordAPI.Auth;
 using DnDiscordAPI.Auth.Services;
 using DnDiscordAPI.Games.Character.Repositories;
 using DnDiscordAPI.Games.Database;
@@ -149,6 +150,25 @@ public class AuthController : ControllerBase
             {
                 Token = token,
                 User = user,
+            });
+        }
+        catch (AccountTombstonedException ex)
+        {
+            // L'utilisateur a supprimé son compte (RGPD art. 17) puis relance
+            // un flow Discord (souvent silencieusement via l'Activity). On ne
+            // peut pas le recréer sans violer l'effacement — mais renvoyer
+            // 500 laisse le front dans le noir. 410 Gone + code d'erreur
+            // structuré permet d'afficher un message actionnable : révoquer
+            // l'accès côté Discord avant de se réinscrire (reviewer N2).
+            _logger.LogWarning(
+                "[OAUTH] Rejected re-authentication for tombstoned Discord account {DiscordId}",
+                ex.DiscordId);
+            return StatusCode(StatusCodes.Status410Gone, new
+            {
+                error = "account_previously_deleted",
+                message = "Ce compte Discord a été supprimé au titre du droit à l'effacement. " +
+                          "Pour vous réinscrire, révoquez d'abord l'accès de DnDiscord dans les " +
+                          "paramètres Discord (Applications autorisées), puis reconnectez-vous.",
             });
         }
         catch (Exception ex)
@@ -546,13 +566,30 @@ public class AuthController : ControllerBase
 
         _logger.LogInformation("[DEV] Generating test token for user: {Username} (ID: {UserId})", username, userId);
 
-        var user = _userStore.GetOrCreateUser(new DiscordUserData
+        User user;
+        try
         {
-            Id = userId,
-            Username = username,
-            Email = email,
-            Avatar = null,
-        });
+            user = _userStore.GetOrCreateUser(new DiscordUserData
+            {
+                Id = userId,
+                Username = username,
+                Email = email,
+                Avatar = null,
+            });
+        }
+        catch (AccountTombstonedException ex)
+        {
+            // Cohérent avec DiscordCallback : renvoyer 410 Gone au lieu d'un
+            // 500 opaque quand le DiscordId a été tombstoné. Permet aussi aux
+            // tests d'intégration d'asserter le contrat HTTP (reviewer N2).
+            _logger.LogWarning(
+                "[DEV] Rejected dev-login for tombstoned Discord account {DiscordId}",
+                ex.DiscordId);
+            return StatusCode(StatusCodes.Status410Gone, new
+            {
+                error = "account_previously_deleted",
+            });
+        }
 
         // Generate JWT token
         var token = _tokenService.GenerateToken(user.Id, user.Username, user.Email);
