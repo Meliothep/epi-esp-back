@@ -131,6 +131,11 @@ public class GameHub : Hub
                 UserId = u.OwnerUserId ?? Guid.Empty,
                 UnitId = u.UnitId,
                 UnitName = u.Name,
+                // Preserved from the original assignment so the rejoin snapshot
+                // re-seeds the front's UnitType (warrior / mage / archer) via
+                // CharacterToUnit.classToUnitType instead of falling back to
+                // the empty-string default (which spawned warrior for everyone).
+                CharacterClass = u.CharacterClass,
                 MaxHp = u.MaxHp,
                 CurrentHp = u.CurrentHp,
                 Initiative = u.Initiative,
@@ -622,6 +627,7 @@ public class GameHub : Hub
                     OwnerUserId = a.UserId,
                     Team = UnitTeam.Player,
                     Name = a.UnitName,
+                    CharacterClass = a.CharacterClass ?? string.Empty,
                     CurrentHp = a.CurrentHp,
                     MaxHp = a.MaxHp,
                     // Front's CharacterToUnit hardcodes maxActionPoints=6 for
