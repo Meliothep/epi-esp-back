@@ -319,14 +319,25 @@ public class SessionManager
     /// Drop a session entirely from the in-memory index (used when the DM
     /// explicitly ends the session by leaving — stale data shouldn't linger
     /// because FindSessionByUser would otherwise auto-rejoin a ghost session
-    /// on the next connect).
+    /// on the next connect). Mirrors CleanupStaleSessions' full teardown —
+    /// _connectionToSession and _messageSequencer must drop the session id
+    /// too, otherwise GetSessionByConnection returns a removed session id
+    /// and message sequence numbers leak between back-to-back sessions.
     /// </summary>
     public bool RemoveSession(string sessionId)
     {
         var removed = _sessions.TryRemove(sessionId, out var session);
-        if (removed && session != null && !string.IsNullOrWhiteSpace(session.JoinCode))
+        if (!removed || session == null) return false;
+
+        if (!string.IsNullOrWhiteSpace(session.JoinCode))
             _joinCodeToSession.TryRemove(session.JoinCode, out _);
-        return removed;
+
+        _messageSequencer.ResetSequence(sessionId);
+
+        foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
+            _connectionToSession.TryRemove(p.ConnectionId!, out _);
+
+        return true;
     }
 
     /// <summary>
