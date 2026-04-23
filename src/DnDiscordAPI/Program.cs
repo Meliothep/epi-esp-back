@@ -13,6 +13,7 @@ using Multiplayer.Hubs;
 using DnDiscordAPI.Messages.Hubs;
 using DnDiscordAPI.Messages.Services;
 using DnDiscordAPI.PartyChat;
+using DnDiscordAPI;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -182,6 +183,11 @@ app.UseAuthorization();
 
 app.MapHub<GameHub>("/hubs/game").RequireCors("AllowFrontend");
 app.MapHub<MessageHub>("/hubs/messages").RequireCors("AllowFrontend");
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapDevLogBridge();
+}
 
 app.MapControllers();
 app.MapHealthChecks("/api/health", new HealthCheckOptions
