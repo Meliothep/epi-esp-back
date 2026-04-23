@@ -86,10 +86,10 @@ public class CampaignService : ICampaignService
         
         _dbContext.Campaigns.Add(campaign);
         await _dbContext.SaveChangesAsync(ct);
-        
+
         _logger.LogInformation("Created campaign {CampaignId} '{Name}'", campaign.Id, campaign.Name);
-        
-        return MapToDetailResponse(campaign);
+
+        return MapToDetailResponse(campaign, userId);
     }
     
     /// <inheritdoc />
@@ -112,11 +112,9 @@ public class CampaignService : ICampaignService
             return null;
         }
         
-        var response = MapToDetailResponse(campaign);
-        response.IsDungeonMaster = campaign.DungeonMasterId == userId;
-        return response;
+        return MapToDetailResponse(campaign, userId);
     }
-    
+
     /// <inheritdoc />
     public async Task<CampaignListResponse> ListCampaignsAsync(
         CampaignFilterRequest filter, 
@@ -231,14 +229,14 @@ public class CampaignService : ICampaignService
         if (request.Status.HasValue) campaign.Status = request.Status.Value;
         
         campaign.UpdatedAt = DateTime.UtcNow;
-        
+
         await _dbContext.SaveChangesAsync(ct);
-        
+
         _logger.LogInformation("Updated campaign {CampaignId}", campaignId);
-        
-        return MapToDetailResponse(campaign);
+
+        return MapToDetailResponse(campaign, userId);
     }
-    
+
     /// <inheritdoc />
     public async Task<bool> DeleteCampaignAsync(
         Guid campaignId, 
@@ -371,11 +369,11 @@ public class CampaignService : ICampaignService
         
         _logger.LogInformation("User {UserId} joined campaign {CampaignId} via invite code", userId, campaign.Id);
         
-        return MapToDetailResponse(campaign);
+        return MapToDetailResponse(campaign, userId);
     }
-    
+
     #endregion
-    
+
     #region Members
     
     /// <inheritdoc />
@@ -576,9 +574,7 @@ public class CampaignService : ICampaignService
 
         _logger.LogInformation("Updated campaign tree for campaign {CampaignId}", campaignId);
 
-        var response = MapToDetailResponse(campaign);
-        response.IsDungeonMaster = campaign.DungeonMasterId == userId;
-        return response;
+        return MapToDetailResponse(campaign, userId);
     }
 
     #endregion
@@ -617,7 +613,9 @@ public class CampaignService : ICampaignService
         };
     }
     
-    private static CampaignDetailResponse MapToDetailResponse(CampaignEntity campaign)
+    /// <param name="userId">The caller's user ID — used to derive <see cref="CampaignDetailResponse.IsDungeonMaster"/>
+    /// at the mapping layer so every call-site is consistent and no setter can be forgotten.</param>
+    private static CampaignDetailResponse MapToDetailResponse(CampaignEntity campaign, Guid userId)
     {
         return new CampaignDetailResponse
         {
@@ -625,6 +623,7 @@ public class CampaignService : ICampaignService
             Name = campaign.Name,
             Description = campaign.Description,
             DungeonMasterId = campaign.DungeonMasterId,
+            IsDungeonMaster = campaign.DungeonMasterId == userId,
             Status = campaign.Status,
             ImageUrl = campaign.ImageUrl,
             MaxPlayers = campaign.MaxPlayers,
