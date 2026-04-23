@@ -316,6 +316,20 @@ public class SessionManager
     }
 
     /// <summary>
+    /// Drop a session entirely from the in-memory index (used when the DM
+    /// explicitly ends the session by leaving — stale data shouldn't linger
+    /// because FindSessionByUser would otherwise auto-rejoin a ghost session
+    /// on the next connect).
+    /// </summary>
+    public bool RemoveSession(string sessionId)
+    {
+        var removed = _sessions.TryRemove(sessionId, out var session);
+        if (removed && session != null && !string.IsNullOrWhiteSpace(session.JoinCode))
+            _joinCodeToSession.TryRemove(session.JoinCode, out _);
+        return removed;
+    }
+
+    /// <summary>
     /// Créer une room standalone (sans campagne) pour le mode multijoueur libre.
     /// </summary>
     public GameSession CreateRoom(Guid hostUserId, string hostUserName, int maxPlayers)

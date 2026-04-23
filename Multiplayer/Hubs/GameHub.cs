@@ -363,33 +363,43 @@ public class GameHub : Hub
     }
 
     /// <summary>
-    /// Quitter la session en cours
+    /// Quitter la session en cours. When the DM leaves, the whole session is
+    /// terminated (SessionEnded broadcast + session removed from the manager);
+    /// a DM-less session can't progress so keeping it alive just left stranded
+    /// players waiting forever. Regular players leave without affecting the
+    /// others.
     /// </summary>
-    /// <returns></returns>
     public async Task LeaveSession()
     {
         var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
-        if (sessionId == null)
+        if (sessionId == null) return;
+
+        var userId = GetUserId();
+        var session = _sessionManager.GetSession(sessionId);
+        var isHostLeaving = session?.DmUserId == userId;
+
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, sessionId);
+        _sessionManager.LeaveSession(Context.ConnectionId);
+
+        if (isHostLeaving)
         {
+            await Clients.Group(sessionId).SendAsync("SessionEnded", new
+            {
+                sessionId,
+                reason = "Host left the session",
+                timestamp = DateTime.UtcNow,
+            });
+            _sessionManager.RemoveSession(sessionId);
+            _logger.LogInformation("DM {UserId} ended session {SessionId} by leaving", userId, sessionId);
             return;
         }
 
-        var userId = GetUserId();
-
-        // Retirer du groupe SignalR
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, sessionId);
-
-        // Retirer de la session
-        _sessionManager.LeaveSession(Context.ConnectionId);
-
-        // Notifier les autres joueurs
         await Clients.Group(sessionId).SendAsync("PlayerLeft", new
         {
-            userId = userId,
+            userId,
             reason = "Player left",
-            timestamp = DateTime.UtcNow
+            timestamp = DateTime.UtcNow,
         });
-
         _logger.LogInformation("User {UserId} left session {SessionId}", userId, sessionId);
     }
 
