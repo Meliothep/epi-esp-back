@@ -525,6 +525,25 @@ public class GameHub : Hub
         session.MapId = mapId;
         session.LastActivityAt = DateTime.UtcNow;
 
+        // Resolve mapData server-side when the client passed null. Campaign
+        // maps live in Postgres, not localStorage, so the front's DmRestartGame
+        // wrapper can't produce mapData for them on its own. Mirror the lookup
+        // done in SendRejoinSnapshotAsync so every client gets the blob.
+        if (string.IsNullOrEmpty(mapData)
+            && session.CampaignId is Guid campaignIdForMap
+            && Guid.TryParse(mapId, out var mapGuid))
+        {
+            try
+            {
+                var map = await _mapLookup.GetMapAsync(campaignIdForMap, mapGuid);
+                mapData = map?.Data;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Map lookup failed during (re)start for session {SessionId}", sessionId);
+            }
+        }
+
         // Build unit assignments for each player. DM is a pure overseer — they don't
         // get a token on the board, even if they happened to select a character earlier.
         var assignments = new List<UnitAssignment>();
@@ -605,8 +624,12 @@ public class GameHub : Hub
                     Name = a.UnitName,
                     CurrentHp = a.CurrentHp,
                     MaxHp = a.MaxHp,
-                    CurrentAp = 4,
-                    MaxAp = 4,
+                    // Front's CharacterToUnit hardcodes maxActionPoints=6 for
+                    // every class. Match it so AP stays in sync across the
+                    // TurnEnded.Units snapshot apply. Previously hardcoded 4 on
+                    // the server, 6 on the front → AP regenerated to 4/6.
+                    CurrentAp = 6,
+                    MaxAp = 6,
                     Initiative = a.Initiative,
                 };
             }
