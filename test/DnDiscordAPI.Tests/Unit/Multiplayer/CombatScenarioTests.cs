@@ -151,6 +151,41 @@ public class CombatScenarioTests
     }
 
     [Fact]
+    public async Task Restart_after_defeat_wipes_prior_combat_entirely()
+    {
+        // Pins the "enemies resurrect after Play Again" bug: any unit from the
+        // defeated life must not survive into the new one. CombatManager
+        // .StartCombatAsync clears Units before re-seeding.
+        var mgr = MakeManager();
+        var session = new GameSession { SessionId = "s1" };
+
+        await mgr.StartCombatAsync(session, new[]
+        {
+            Unit("p1", UnitTeam.Player, hp: 5, initiative: 0),
+            Unit("e1", UnitTeam.Enemy, hp: 20, initiative: 25),
+            Unit("e2", UnitTeam.Enemy, hp: 15, initiative: 15),
+        });
+        await mgr.ApplyAttackAsync(session, "e1", "p1", damage: 10, apCost: 0);
+        await mgr.EndTurnAsync(session, "e1"); // detects Defeat
+
+        Assert.Equal(CombatPhase.Resolved, session.Combat.Phase);
+        Assert.Equal(CombatResult.Defeat, session.Combat.Outcome);
+
+        // Restart with only the player (Play Again scenario — no DM-spawned
+        // enemies yet). StartCombatAsync clears Units before re-seeding.
+        await mgr.StartCombatAsync(session, new[]
+        {
+            Unit("p1", UnitTeam.Player, hp: 30, initiative: 20),
+        });
+
+        Assert.DoesNotContain("e1", session.Combat.Units.Keys);
+        Assert.DoesNotContain("e2", session.Combat.Units.Keys);
+        Assert.Single(session.Combat.Units);
+        Assert.Null(session.Combat.Outcome);
+        Assert.Equal(1, session.Combat.Round);
+    }
+
+    [Fact]
     public async Task EndTurn_payload_carries_full_unit_snapshot_so_both_clients_can_apply_identically()
     {
         // This test pins the contract that EndTurnAsync + the hub wrapper produce
