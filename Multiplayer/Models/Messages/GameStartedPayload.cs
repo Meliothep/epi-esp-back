@@ -22,4 +22,6 @@ public class UnitAssignment
     public int Defense { get; set; }
     public int MovementRange { get; set; }
     public int AttackRange { get; set; }
+    public int? StartX { get; set; }
+    public int? StartY { get; set; }
 }

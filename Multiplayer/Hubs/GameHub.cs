@@ -21,6 +21,7 @@ public class GameHub : Hub
     private readonly IInventoryGrantService _inventoryGrant;
     private readonly ICampaignMapLookupService _mapLookup;
     private readonly CombatManager _combatManager;
+    private readonly SpawnPlacementService _spawnPlacementService;
 
     /// <summary>
     /// Constructeur du GameHub
@@ -28,7 +29,8 @@ public class GameHub : Hub
     public GameHub(ILogger<GameHub> logger, SessionManager sessionManager, MessageSequencer messageSequencer,
         IUserContextService userContextService,
         ICharacterLookupService characterLookup, IInventoryGrantService inventoryGrant,
-        ICampaignMapLookupService mapLookup, CombatManager combatManager)
+        ICampaignMapLookupService mapLookup, CombatManager combatManager,
+        SpawnPlacementService spawnPlacementService)
     {
         _logger = logger;
         _sessionManager = sessionManager;
@@ -38,6 +40,7 @@ public class GameHub : Hub
         _inventoryGrant = inventoryGrant;
         _mapLookup = mapLookup;
         _combatManager = combatManager;
+        _spawnPlacementService = spawnPlacementService;
     }
 
     /// <summary>
@@ -653,6 +656,35 @@ public class GameHub : Hub
         finally
         {
             session.Combat.Lock.Release();
+        }
+
+        // Compute server-authoritative ally spawn positions so all clients start
+        // on the same squares regardless of when their GameStarted arrives.
+        if (assignments.Count > 0 && !string.IsNullOrEmpty(mapData))
+        {
+            var placer = _spawnPlacementService;
+            var (walkable, spawnZones, gridWidth, gridHeight) = placer.BuildWalkableGrid(mapData);
+            var seedBytes = Guid.Parse(sessionId).ToByteArray();
+            var placementSeed = BitConverter.ToInt32(seedBytes, 0);
+            var positions = placer.GetSpawnPositions(
+                walkable, spawnZones, new HashSet<string>(),
+                "ally", assignments.Count, gridWidth, gridHeight, placementSeed);
+
+            for (var i = 0; i < positions.Count && i < assignments.Count; i++)
+            {
+                var pos = positions[i];
+                assignments[i].StartX = pos.X;
+                assignments[i].StartY = pos.Y;
+                // Mirror into the live combat roster.
+                if (session.Combat.Units.TryGetValue(assignments[i].UnitId, out var unit))
+                {
+                    unit.PositionX = pos.X;
+                    unit.PositionY = pos.Y;
+                }
+            }
+
+            _logger.LogInformation("Ally placement seeded session {SessionId} with {Count} positions",
+                sessionId, positions.Count);
         }
 
         var payload = new GameStartedPayload
