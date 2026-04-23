@@ -198,6 +198,35 @@ namespace Multiplayer.Services
         }
 
         /// <summary>
+        /// Re-evaluates the alive rosters and transitions to Resolved if one side has been wiped
+        /// out. Returns the resolution payload when a transition fired, or null otherwise. Used by
+        /// out-of-band HP mutations (<c>DmAdjustHp</c>) that can kill the last enemy / player
+        /// without going through <c>EndTurnAsync</c>'s normal cursor-advance path.
+        /// </summary>
+        public async Task<TurnAdvanceResult?> DetectOutcomeAsync(GameSession session)
+        {
+            await session.Combat.Lock.WaitAsync();
+            try
+            {
+                session.LastActivityAt = DateTime.UtcNow;
+                var combat = session.Combat;
+                if (combat.Phase == CombatPhase.FreeRoam || combat.Phase == CombatPhase.Resolved)
+                    return null;
+
+                var outcome = CheckOutcome(combat);
+                if (!outcome.HasValue) return null;
+
+                combat.Phase = CombatPhase.Resolved;
+                combat.Outcome = outcome;
+                return new TurnAdvanceResult(combat.Phase, combat.Round, combat.CurrentUnitId, outcome);
+            }
+            finally
+            {
+                session.Combat.Lock.Release();
+            }
+        }
+
+        /// <summary>
         /// Forcibly ends combat (e.g. DM-triggered). Transitions back to FreeRoam and clears turn state.
         /// </summary>
         public async Task EndCombatAsync(GameSession session)

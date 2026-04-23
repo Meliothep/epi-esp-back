@@ -281,6 +281,83 @@ public class CombatManagerTests
         Assert.Equal(r1.CurrentUnitId, r2.CurrentUnitId);
     }
 
+    [Fact]
+    public async Task DetectOutcome_returns_victory_when_last_enemy_hp_zero_mid_combat()
+    {
+        var mgr = MakeManager();
+        var session = new GameSession { SessionId = "s1" };
+        await mgr.StartCombatAsync(session, new[]
+        {
+            Unit("p1", UnitTeam.Player, initiative: 20),
+            Unit("e1", UnitTeam.Enemy, hp: 10, initiative: 1)
+        });
+        // Mimic DmAdjustHp: clamp HP to 0 outside the FSM.
+        session.Combat.Units["e1"].CurrentHp = 0;
+
+        var result = await mgr.DetectOutcomeAsync(session);
+
+        Assert.NotNull(result);
+        Assert.Equal(CombatPhase.Resolved, result!.Phase);
+        Assert.Equal(CombatResult.Victory, result.Outcome);
+        Assert.Equal(CombatPhase.Resolved, session.Combat.Phase);
+        Assert.Equal(CombatResult.Victory, session.Combat.Outcome);
+    }
+
+    [Fact]
+    public async Task DetectOutcome_returns_defeat_when_last_player_hp_zero_mid_combat()
+    {
+        var mgr = MakeManager();
+        var session = new GameSession { SessionId = "s1" };
+        await mgr.StartCombatAsync(session, new[]
+        {
+            Unit("p1", UnitTeam.Player, hp: 10, initiative: 20),
+            Unit("e1", UnitTeam.Enemy, initiative: 1)
+        });
+        session.Combat.Units["p1"].CurrentHp = 0;
+
+        var result = await mgr.DetectOutcomeAsync(session);
+
+        Assert.NotNull(result);
+        Assert.Equal(CombatResult.Defeat, result!.Outcome);
+        Assert.Equal(CombatPhase.Resolved, session.Combat.Phase);
+    }
+
+    [Fact]
+    public async Task DetectOutcome_returns_null_when_both_sides_still_have_alive_units()
+    {
+        var mgr = MakeManager();
+        var session = new GameSession { SessionId = "s1" };
+        await mgr.StartCombatAsync(session, new[]
+        {
+            Unit("p1", UnitTeam.Player, initiative: 20),
+            Unit("e1", UnitTeam.Enemy, initiative: 1)
+        });
+
+        var result = await mgr.DetectOutcomeAsync(session);
+
+        Assert.Null(result);
+        Assert.NotEqual(CombatPhase.Resolved, session.Combat.Phase);
+    }
+
+    [Fact]
+    public async Task DetectOutcome_noop_when_combat_is_free_roam_or_already_resolved()
+    {
+        var mgr = MakeManager();
+        var session = new GameSession { SessionId = "s1" };
+        session.Combat.Units["e1"] = Unit("e1", UnitTeam.Enemy, hp: 0);
+        // FreeRoam phase — even with a wiped roster, DetectOutcome must not flip state.
+
+        var free = await mgr.DetectOutcomeAsync(session);
+        Assert.Null(free);
+        Assert.Equal(CombatPhase.FreeRoam, session.Combat.Phase);
+
+        // Now force Resolved and assert the second call is also a no-op.
+        session.Combat.Phase = CombatPhase.Resolved;
+        session.Combat.Outcome = CombatResult.Victory;
+        var resolved = await mgr.DetectOutcomeAsync(session);
+        Assert.Null(resolved);
+    }
+
     private static UnitRuntimeState CloneUnit(UnitRuntimeState u) => new()
     {
         UnitId = u.UnitId,

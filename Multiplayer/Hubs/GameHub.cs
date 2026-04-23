@@ -871,9 +871,10 @@ public class GameHub : Hub
     /// DM adjusts a unit's HP (heal or damage, any team). Clamps 0..MaxHp.
     /// Transitions isAlive on zero-cross in either direction. Broadcasts
     /// <c>UnitHpAdjusted</c> so every client applies the same delta + plays
-    /// death VFX if the unit just died. Intentionally does NOT auto-detect
-    /// combat victory/defeat — the DM drives the post-combat flow via
-    /// <c>DmEndCombat</c> / <c>DmRestartGame</c>.
+    /// death VFX if the unit just died. When the adjustment wipes out one
+    /// side mid-combat, follows up with a <c>TurnEnded</c> broadcast carrying
+    /// the outcome so the front's <c>applyTurnEnded</c> flips back to free
+    /// roam without waiting on <c>DmEndCombat</c>.
     /// </summary>
     public async Task DmAdjustHp(string unitId, int delta)
     {
@@ -924,6 +925,30 @@ public class GameHub : Hub
         };
         var message = _messageSequencer.CreateMessage(sessionId, "UnitHpAdjusted", payload);
         await Clients.Group(sessionId).SendAsync("UnitHpAdjusted", message);
+
+        // Auto-end combat when the HP mutation wipes out one side. Only fires
+        // mid-combat — FreeRoam / already-Resolved sessions return null.
+        if (wasAlive && !isAlive)
+        {
+            var resolution = await _combatManager.DetectOutcomeAsync(session);
+            if (resolution != null)
+            {
+                var turnEnded = new TurnEndedPayload
+                {
+                    UnitId = unitId,
+                    NextUnitId = resolution.CurrentUnitId,
+                    Phase = resolution.Phase,
+                    Round = resolution.Round,
+                    Outcome = resolution.Outcome,
+                    Units = session.Combat.Units.Values.ToList(),
+                };
+                _logger.LogInformation(
+                    "Combat auto-resolved by DmAdjustHp in session {SessionId}: {Outcome}",
+                    sessionId, resolution.Outcome);
+                var turnMessage = _messageSequencer.CreateMessage(sessionId, "TurnEnded", turnEnded);
+                await Clients.Group(sessionId).SendAsync("TurnEnded", turnMessage);
+            }
+        }
     }
 
     /// <summary>
