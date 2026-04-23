@@ -852,6 +852,65 @@ public class GameHub : Hub
     }
 
     /// <summary>
+    /// DM adjusts a unit's HP (heal or damage, any team). Clamps 0..MaxHp.
+    /// Transitions isAlive on zero-cross in either direction. Broadcasts
+    /// <c>UnitHpAdjusted</c> so every client applies the same delta + plays
+    /// death VFX if the unit just died. Intentionally does NOT auto-detect
+    /// combat victory/defeat — the DM drives the post-combat flow via
+    /// <c>DmEndCombat</c> / <c>DmRestartGame</c>.
+    /// </summary>
+    public async Task DmAdjustHp(string unitId, int delta)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId)
+            ?? throw new HubException("Not in a session");
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+        if (session.DmUserId != GetUserId())
+            throw new HubException("Only the DM can adjust HP");
+        if (string.IsNullOrWhiteSpace(unitId))
+            throw new HubException("unitId required");
+
+        UnitRuntimeState? unit;
+        int newHp;
+        bool wasAlive;
+        bool isAlive;
+        int appliedDelta;
+
+        await session.Combat.Lock.WaitAsync();
+        try
+        {
+            if (!session.Combat.Units.TryGetValue(unitId, out unit) || unit is null)
+                throw new HubException($"Unit '{unitId}' not in combat roster");
+
+            wasAlive = unit.IsAlive;
+            var before = unit.CurrentHp;
+            newHp = Math.Clamp(before + delta, 0, unit.MaxHp);
+            appliedDelta = newHp - before;
+            unit.CurrentHp = newHp;
+            isAlive = unit.IsAlive; // derived from CurrentHp on UnitRuntimeState
+        }
+        finally
+        {
+            session.Combat.Lock.Release();
+        }
+
+        _logger.LogInformation("DM {UserId} adjusted {UnitId} HP by {Delta} -> {NewHp}/{MaxHp} (session {SessionId})",
+            GetUserId(), unitId, appliedDelta, newHp, unit.MaxHp, sessionId);
+
+        var payload = new UnitHpAdjustedPayload
+        {
+            UnitId = unitId,
+            Hp = newHp,
+            MaxHp = unit.MaxHp,
+            IsAlive = isAlive,
+            Delta = appliedDelta,
+            WasAlive = wasAlive,
+        };
+        var message = _messageSequencer.CreateMessage(sessionId, "UnitHpAdjusted", payload);
+        await Clients.Group(sessionId).SendAsync("UnitHpAdjusted", message);
+    }
+
+    /// <summary>
     /// DM force-moves any token on the board. Broadcasts DmTokenMoved to all players.
     /// </summary>
     public async Task DmMoveToken(DmMoveTokenPayload payload)
