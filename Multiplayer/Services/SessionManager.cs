@@ -501,8 +501,8 @@ public class SessionManager
     /// </summary>
     /// <param name="dmDisconnectedThreshold">e.g. 5 minutes - session supprimée si le DM est toujours déconnecté.</param>
     /// <param name="inactivityThreshold">e.g. 10 minutes - session supprimée si aucune activité.</param>
-    /// <returns>Nombre de sessions supprimées.</returns>
-    public int CleanupStaleSessionsByPolicy(TimeSpan dmDisconnectedThreshold, TimeSpan inactivityThreshold)
+    /// <returns>IDs des sessions supprimées (pour nettoyage des stores dépendants).</returns>
+    public IReadOnlyList<string> CleanupStaleSessionsByPolicy(TimeSpan dmDisconnectedThreshold, TimeSpan inactivityThreshold)
     {
         var now = DateTime.UtcNow;
         var toRemove = _sessions.Values
@@ -529,6 +529,6 @@ public class SessionManager
                 session.SessionId, session.DmDisconnectedAt, session.LastActivityAt);
         }
 
-        return toRemove.Count;
+        return toRemove.Select(s => s.SessionId).ToList();
     }
 }
