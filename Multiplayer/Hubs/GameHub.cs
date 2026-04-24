@@ -292,6 +292,13 @@ public class GameHub : Hub
 
         if (sessionId != null)
         {
+            // Capture the session (and whether the disconnecting user is the DM)
+            // BEFORE MarkPlayerDisconnected mutates state. The session object itself
+            // is retained by SessionManager for the reconnect grace period, so it
+            // remains valid for the pending-roll fanout below.
+            var session = _sessionManager.GetSession(sessionId);
+            var isDmDisconnecting = session != null && session.DmUserId == userId;
+
             // Marquer comme déconnecté (grace period pour reconnexion)
             _sessionManager.MarkPlayerDisconnected(Context.ConnectionId);
 
@@ -302,6 +309,27 @@ public class GameHub : Hub
                 connectionId = Context.ConnectionId,
                 timestamp = DateTime.UtcNow
             });
+
+            // If the DM just dropped, cancel every in-flight roll request so
+            // targeted players stop waiting on results that will never broadcast.
+            // Snapshot the keys to keep mutation-during-iteration behaviour
+            // explicit; TryRemove guards against races with an explicit
+            // DmCancelRollRequest that happens to land in the same instant.
+            if (isDmDisconnecting && session != null)
+            {
+                foreach (var requestId in session.PendingRolls.Keys.ToList())
+                {
+                    if (session.PendingRolls.TryRemove(requestId, out var pending))
+                    {
+                        await Clients.Group(sessionId).SendAsync(
+                            "RollCanceled",
+                            new RollCanceledPayload(
+                                requestId,
+                                pending.Label,
+                                pending.PendingUserIds.ToList()));
+                    }
+                }
+            }
         }
 
         await base.OnDisconnectedAsync(exception);
