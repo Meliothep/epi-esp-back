@@ -50,4 +50,16 @@ public class PendingRollRequest
             return true;
         }
     }
+
+    /// <summary>
+    /// Returns a snapshot of submitted values, copied inside the lock so iteration
+    /// is safe against concurrent TrySubmit calls.
+    /// </summary>
+    public IReadOnlyDictionary<Guid, int> SnapshotSubmittedValues()
+    {
+        lock (_lock)
+        {
+            return new Dictionary<Guid, int>(_submittedValues);
+        }
+    }
 }

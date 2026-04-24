@@ -221,7 +221,7 @@ public class GameHub : Hub
                         pending.RollValues.Keys.ToList(),
                         pending.RollValues.Count));
 
-                foreach (var (submittedUserId, submittedValue) in pending.SubmittedValues)
+                foreach (var (submittedUserId, submittedValue) in pending.SnapshotSubmittedValues())
                 {
                     var p = session.Players.FirstOrDefault(pp => pp.UserId == submittedUserId);
                     await Clients.Caller.SendAsync(
@@ -257,7 +257,7 @@ public class GameHub : Hub
                         pending.RollValues.Keys.ToList(),
                         pending.RollValues.Count));
 
-                foreach (var (submittedUserId, submittedValue) in pending.SubmittedValues)
+                foreach (var (submittedUserId, submittedValue) in pending.SnapshotSubmittedValues())
                 {
                     var p = session.Players.FirstOrDefault(pp => pp.UserId == submittedUserId);
                     await Clients.Caller.SendAsync(
