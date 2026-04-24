@@ -1,8 +1,7 @@
+using DnDiscord.Campaign.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace DnDiscord.Campaign.Services;
 
@@ -28,6 +27,12 @@ public class UserContextService : IUserContextService
     /// </summary>
     public Guid GetCurrentUserId()
     {
+        return DiscordIdMapping.ToGuid(GetCurrentDiscordUserId());
+    }
+
+    /// <inheritdoc />
+    public string GetCurrentDiscordUserId()
+    {
         var user = _httpContextAccessor.HttpContext?.User;
 
         if (user == null)
@@ -45,17 +50,20 @@ public class UserContextService : IUserContextService
             throw new UnauthorizedAccessException("User ID not found in token");
         }
 
-        // Convert Discord ID string to deterministic Guid using MD5 hash
-        return ConvertDiscordIdToGuid(discordId);
+        return discordId;
     }
 
-    /// <summary>
-    /// Converts a Discord ID (string) to a deterministic Guid using MD5 hashing.
-    /// </summary>
-    private static Guid ConvertDiscordIdToGuid(string discordId)
+    /// <inheritdoc />
+    public string GetCurrentUserName()
     {
-        using var md5 = MD5.Create();
-        var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(discordId));
-        return new Guid(hash);
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user == null) return string.Empty;
+
+        return user.FindFirst("preferred_username")?.Value
+            ?? user.FindFirst(ClaimTypes.Name)?.Value
+            ?? user.FindFirst("name")?.Value
+            ?? user.FindFirst("unique_name")?.Value
+            ?? user.FindFirst("username")?.Value
+            ?? string.Empty;
     }
 }

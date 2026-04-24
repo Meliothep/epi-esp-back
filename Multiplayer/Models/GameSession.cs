@@ -24,5 +24,11 @@ namespace Multiplayer.Models
         public DateTime? DmDisconnectedAt { get; set; }
         public int MaxPlayers { get; set; } = 6; // 5 joueurs + 1 DM
         public string? MapId { get; set; }
+
+        /// <summary>
+        /// Server-authoritative combat state. Phase defaults to <see cref="CombatPhase.FreeRoam"/>;
+        /// the <see cref="Services.CombatManager"/> is the only writer.
+        /// </summary>
+        public CombatState Combat { get; set; } = new();
     }
 }

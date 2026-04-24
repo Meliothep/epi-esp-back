@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using DnDiscord.Campaign.BL.Campaigns.DTOs;
 using DnDiscord.Campaign.DataAccess;
 using DnDiscord.Campaign.DataAccess.Models;
+using DnDiscord.Campaign.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using CampaignEntity = DnDiscord.Campaign.DataAccess.Models.Campaign;
@@ -33,6 +34,12 @@ public interface ICampaignService
 
     // Campaign tree
     Task<CampaignDetailResponse?> UpdateCampaignTreeAsync(Guid campaignId, string? treeDefinition, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lightweight check: returns true iff the campaign exists and the user is its DM.
+    /// Prefer this over GetCampaignAsync when you only need the auth answer.
+    /// </summary>
+    Task<bool> IsDungeonMasterAsync(Guid campaignId, Guid userId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -42,15 +49,18 @@ public class CampaignService : ICampaignService
 {
     private readonly CampaignDbContext _dbContext;
     private readonly ICampaignValidator _validator;
+    private readonly IUserContextService _userContext;
     private readonly ILogger<CampaignService> _logger;
-    
+
     public CampaignService(
         CampaignDbContext dbContext,
         ICampaignValidator validator,
+        IUserContextService userContext,
         ILogger<CampaignService> logger)
     {
         _dbContext = dbContext;
         _validator = validator;
+        _userContext = userContext;
         _logger = logger;
     }
     
@@ -86,13 +96,10 @@ public class CampaignService : ICampaignService
         
         _dbContext.Campaigns.Add(campaign);
         await _dbContext.SaveChangesAsync(ct);
-        
+
         _logger.LogInformation("Created campaign {CampaignId} '{Name}'", campaign.Id, campaign.Name);
-        
-        var response = MapToDetailResponse(campaign);
-        // Creator is always the DM.
-        response.IsDungeonMaster = true;
-        return response;
+
+        return MapToDetailResponse(campaign, userId);
     }
     
     /// <inheritdoc />
@@ -115,11 +122,9 @@ public class CampaignService : ICampaignService
             return null;
         }
         
-        var response = MapToDetailResponse(campaign);
-        response.IsDungeonMaster = campaign.DungeonMasterId == userId;
-        return response;
+        return MapToDetailResponse(campaign, userId);
     }
-    
+
     /// <inheritdoc />
     public async Task<CampaignListResponse> ListCampaignsAsync(
         CampaignFilterRequest filter, 
@@ -234,16 +239,14 @@ public class CampaignService : ICampaignService
         if (request.Status.HasValue) campaign.Status = request.Status.Value;
         
         campaign.UpdatedAt = DateTime.UtcNow;
-        
+
         await _dbContext.SaveChangesAsync(ct);
-        
+
         _logger.LogInformation("Updated campaign {CampaignId}", campaignId);
-        
-        var response = MapToDetailResponse(campaign);
-        response.IsDungeonMaster = campaign.DungeonMasterId == userId;
-        return response;
+
+        return MapToDetailResponse(campaign, userId);
     }
-    
+
     /// <inheritdoc />
     public async Task<bool> DeleteCampaignAsync(
         Guid campaignId, 
@@ -359,7 +362,15 @@ public class CampaignService : ICampaignService
             throw new CampaignException("You are the Dungeon Master of this campaign");
         }
         
-        // Add member
+        // Add member. Seed Nickname with the JWT's display name so the UI doesn't
+        // fall back to the raw user GUID. Falls back to "Aventurier #short" when
+        // the token doesn't carry a username claim (e.g. service-to-service calls).
+        var displayName = _userContext.GetCurrentUserName();
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            displayName = $"Aventurier #{userId.ToString("N")[..6]}";
+        }
+
         var member = new CampaignMember
         {
             Id = Guid.NewGuid(),
@@ -368,7 +379,8 @@ public class CampaignService : ICampaignService
             Role = CampaignMemberRole.Player,
             Status = MembershipStatus.Active,
             JoinedAt = DateTime.UtcNow,
-            AcceptedAt = DateTime.UtcNow
+            AcceptedAt = DateTime.UtcNow,
+            Nickname = displayName,
         };
         
         _dbContext.CampaignMembers.Add(member);
@@ -376,11 +388,11 @@ public class CampaignService : ICampaignService
         
         _logger.LogInformation("User {UserId} joined campaign {CampaignId} via invite code", userId, campaign.Id);
         
-        return MapToDetailResponse(campaign);
+        return MapToDetailResponse(campaign, userId);
     }
-    
+
     #endregion
-    
+
     #region Members
     
     /// <inheritdoc />
@@ -581,9 +593,7 @@ public class CampaignService : ICampaignService
 
         _logger.LogInformation("Updated campaign tree for campaign {CampaignId}", campaignId);
 
-        var response = MapToDetailResponse(campaign);
-        response.IsDungeonMaster = campaign.DungeonMasterId == userId;
-        return response;
+        return MapToDetailResponse(campaign, userId);
     }
 
     #endregion
@@ -622,7 +632,9 @@ public class CampaignService : ICampaignService
         };
     }
     
-    private static CampaignDetailResponse MapToDetailResponse(CampaignEntity campaign)
+    /// <param name="userId">The caller's user ID — used to derive <see cref="CampaignDetailResponse.IsDungeonMaster"/>
+    /// at the mapping layer so every call-site is consistent and no setter can be forgotten.</param>
+    private static CampaignDetailResponse MapToDetailResponse(CampaignEntity campaign, Guid userId)
     {
         return new CampaignDetailResponse
         {
@@ -630,6 +642,7 @@ public class CampaignService : ICampaignService
             Name = campaign.Name,
             Description = campaign.Description,
             DungeonMasterId = campaign.DungeonMasterId,
+            IsDungeonMaster = campaign.DungeonMasterId == userId,
             Status = campaign.Status,
             ImageUrl = campaign.ImageUrl,
             MaxPlayers = campaign.MaxPlayers,
@@ -662,7 +675,15 @@ public class CampaignService : ICampaignService
             AcceptedAt = member.AcceptedAt
         };
     }
-    
+
+    /// <inheritdoc />
+    public Task<bool> IsDungeonMasterAsync(Guid campaignId, Guid userId, CancellationToken ct = default)
+    {
+        return _dbContext.Campaigns
+            .AsNoTracking()
+            .AnyAsync(c => c.Id == campaignId && c.DungeonMasterId == userId, ct);
+    }
+
     #endregion
 }
 

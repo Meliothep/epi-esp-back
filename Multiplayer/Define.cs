@@ -36,6 +36,23 @@ namespace Multiplayer
             Fled // Fuite
         }
 
+        public enum CombatPhase
+        {
+            FreeRoam,
+            Preparation,
+            PlayerTurn,
+            EnemyTurn,
+            Resolved
+        }
+
+        public enum UnitTeam
+        {
+            Player,
+            Enemy,
+            Ally,
+            Neutral
+        }
+
         public enum NarrationStyle
         {
             Regular,   // Narration normale

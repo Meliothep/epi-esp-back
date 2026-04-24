@@ -1,6 +1,7 @@
 using DnDiscordAPI.Games.Character.Repositories;
 using DnDiscordAPI.Games.Character.Services;
 using DnDiscordAPI.Games.Database;
+using DnDiscordAPI.Games.Inventory.Services;
 using Microsoft.EntityFrameworkCore;
 using Multiplayer.Services;
 
@@ -24,6 +25,9 @@ public static class GamesExtensions
         builder.Services.AddScoped<ICharacterService, CharacterService>();
         builder.Services.AddScoped<ICharacterRepository, CharacterRepository>();
         builder.Services.AddScoped<ICharacterLookupService, CharacterLookupAdapter>();
+        builder.Services.AddScoped<IInventoryService, InventoryService>();
+        builder.Services.AddScoped<IInventoryGrantService, InventoryGrantAdapter>();
+        builder.Services.AddScoped<Multiplayer.Services.ICampaignMapLookupService, DnDiscordAPI.Campaign.CampaignMapLookupAdapter>();
 
         return builder;
     }
