@@ -1133,8 +1133,7 @@ public class GameHub : Hub
         if (session.DmUserId != userId)
             throw new HubException("Only the DM can do hidden rolls");
 
-        var rng = new Random();
-        var result = rng.Next(1, diceType + 1);
+        var result = Random.Shared.Next(1, diceType + 1);
 
         var payload = new DmHiddenRollPayload
         {
