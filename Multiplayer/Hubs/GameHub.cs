@@ -1173,6 +1173,79 @@ public class GameHub : Hub
         await Clients.Group(sessionId).SendAsync("DmUnitSpawned", message);
     }
 
+    /// <summary>
+    /// DM triggers a d20 roll request for one or more players. Each target
+    /// receives a private RollRequested event with their pre-rolled value;
+    /// the DM gets a DmEcho; and the whole session sees a public announcement.
+    /// </summary>
+    public async Task DmRequestRoll(DmRollRequestPayload payload)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null)
+            throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null)
+            throw new HubException("Session not found");
+
+        var userId = GetUserId();
+        if (session.DmUserId != userId)
+            throw new HubException("Only the DM can request rolls");
+
+        if (payload.DiceType != "d20")
+            throw new HubException("Only d20 is supported in v1");
+
+        if (session.PendingRolls.Count >= 10)
+            throw new HubException("Too many open roll requests (max 10)");
+
+        var targets = payload.TargetUserIds.Count > 0
+            ? payload.TargetUserIds
+                .Where(id => session.Players.Any(p =>
+                    p.UserId == id &&
+                    p.Role == PlayerRole.Player &&
+                    p.Status == ConnectionStatus.Connected))
+                .ToList()
+            : session.Players
+                .Where(p => p.Role == PlayerRole.Player &&
+                            p.Status == ConnectionStatus.Connected)
+                .Select(p => p.UserId)
+                .ToList();
+
+        if (targets.Count == 0)
+            throw new HubException("No valid connected targets in session");
+
+        var requestId = Guid.NewGuid();
+        var values = targets.ToDictionary(id => id, _ => Random.Shared.Next(1, 21));
+        var pending = new PendingRollRequest
+        {
+            RequestId = requestId,
+            DiceType = "d20",
+            Label = payload.Label,
+            RollValues = values,
+            PendingUserIds = new HashSet<Guid>(targets),
+        };
+
+        if (!session.PendingRolls.TryAdd(requestId, pending))
+            throw new HubException("Roll request id collision — retry");
+
+        foreach (var (uid, val) in values)
+        {
+            await Clients.User(uid.ToString()).SendAsync(
+                "RollRequested",
+                new RollRequestedPayload(requestId, "d20", payload.Label, val));
+        }
+
+        await Clients.User(session.DmUserId.ToString()).SendAsync(
+            "RollRequestedDmEcho",
+            new RollRequestedDmEchoPayload(
+                requestId, "d20", payload.Label, targets, targets.Count));
+
+        await Clients.Group(sessionId).SendAsync(
+            "RollRequestedPublic",
+            new RollRequestedPublicPayload(
+                requestId, "d20", payload.Label, targets, targets.Count));
+    }
+
     #endregion
 
     #region [== Messages de jeu ==]
