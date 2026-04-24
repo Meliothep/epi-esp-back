@@ -1200,15 +1200,18 @@ public class GameHub : Hub
 
         var targets = payload.TargetUserIds.Count > 0
             ? payload.TargetUserIds
-                .Where(id => session.Players.Any(p =>
+                .Where(id => id != session.DmUserId && session.Players.Any(p =>
                     p.UserId == id &&
                     p.Role == PlayerRole.Player &&
                     p.Status == ConnectionStatus.Connected))
+                .Distinct()
                 .ToList()
             : session.Players
-                .Where(p => p.Role == PlayerRole.Player &&
+                .Where(p => p.UserId != session.DmUserId &&
+                            p.Role == PlayerRole.Player &&
                             p.Status == ConnectionStatus.Connected)
                 .Select(p => p.UserId)
+                .Distinct()
                 .ToList();
 
         if (targets.Count == 0)
