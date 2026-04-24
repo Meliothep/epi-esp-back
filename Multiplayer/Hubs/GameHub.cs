@@ -396,6 +396,7 @@ public class GameHub : Hub
                 timestamp = DateTime.UtcNow,
             });
             _sessionManager.RemoveSession(sessionId);
+            _stateManager.ClearSnapshot(sessionId);
             _logger.LogInformation("DM {UserId} ended session {SessionId} by leaving", userId, sessionId);
             return;
         }
@@ -1016,11 +1017,31 @@ public class GameHub : Hub
         if (payload == null || string.IsNullOrWhiteSpace(payload.UnitId) || payload.Target == null)
             throw new HubException("Invalid payload");
 
-        if (session.Combat.Units.TryGetValue(payload.UnitId, out var unit))
+        bool unitFound;
+        await session.Combat.Lock.WaitAsync();
+        try
         {
-            unit.PositionX = payload.Target.X;
-            unit.PositionY = payload.Target.Y;
+            if (session.Combat.Units.TryGetValue(payload.UnitId, out var unit))
+            {
+                unit.PositionX = payload.Target.X;
+                unit.PositionY = payload.Target.Y;
+                unitFound = true;
+            }
+            else
+            {
+                unitFound = false;
+            }
         }
+        finally
+        {
+            session.Combat.Lock.Release();
+        }
+
+        if (!unitFound)
+            _logger.LogWarning("DmMoveToken: unit {UnitId} not found in session {SessionId} — server state unchanged, broadcast skipped",
+                payload.UnitId, sessionId);
+
+        if (!unitFound) return;
 
         var message = _messageSequencer.CreateMessage(sessionId, "DmTokenMoved", payload);
         await Clients.Group(sessionId).SendAsync("DmTokenMoved", message);
@@ -1170,7 +1191,7 @@ public class GameHub : Hub
         {
             _logger.LogWarning("EndTurn rejected by CombatManager for unit {UnitId} in session {SessionId}",
                 payload.UnitId, sessionId);
-            return;
+            throw new HubException("Turn not allowed: not your turn or wrong combat phase");
         }
 
         var outgoing = new TurnEndedPayload
@@ -1250,9 +1271,17 @@ public class GameHub : Hub
     {
         var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
         if (sessionId == null)
-        {
             throw new HubException("Not in a session");
-        }
+
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+
+        var userId = GetUserId();
+        if (!CanControlUnit(session, payload.UnitId, userId))
+            throw new HubException("You do not control that unit");
+
+        if (!IsLegalCombatAction(session, payload.UnitId))
+            throw new HubException("Unit cannot use abilities right now");
 
         var message = _messageSequencer.CreateMessage(sessionId, "AbilityUsed", payload);
 
@@ -1270,6 +1299,15 @@ public class GameHub : Hub
         var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
         if (sessionId == null)
             throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+
+        if (session.DmUserId != GetUserId())
+            throw new HubException("Only the DM can push a state snapshot");
+
+        if (snapshot.SessionId != sessionId)
+            throw new HubException("Snapshot session id mismatch");
 
         _stateManager.SetSnapshot(sessionId, snapshot);
 
@@ -1292,9 +1330,22 @@ public class GameHub : Hub
         if (snapshot == null)
         {
             var session = _sessionManager.GetSession(sessionId);
-            snapshot = session == null
-                ? new GameStateSnapshot { SessionId = sessionId }
-                : GameStateSnapshot.FromSession(session);
+            if (session != null)
+            {
+                await session.Combat.Lock.WaitAsync();
+                try
+                {
+                    snapshot = GameStateSnapshot.FromSession(session);
+                }
+                finally
+                {
+                    session.Combat.Lock.Release();
+                }
+            }
+            else
+            {
+                snapshot = new GameStateSnapshot { SessionId = sessionId };
+            }
             _stateManager.SetSnapshot(sessionId, snapshot);
         }
 

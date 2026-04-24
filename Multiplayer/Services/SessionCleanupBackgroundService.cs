@@ -9,6 +9,7 @@ namespace Multiplayer.Services;
 public class SessionCleanupBackgroundService : BackgroundService
 {
     private readonly SessionManager _sessionManager;
+    private readonly StateManager _stateManager;
     private readonly ILogger<SessionCleanupBackgroundService> _logger;
     private static readonly TimeSpan RunInterval = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan DmDisconnectedThreshold = TimeSpan.FromMinutes(5);
@@ -16,9 +17,11 @@ public class SessionCleanupBackgroundService : BackgroundService
 
     public SessionCleanupBackgroundService(
         SessionManager sessionManager,
+        StateManager stateManager,
         ILogger<SessionCleanupBackgroundService> logger)
     {
         _sessionManager = sessionManager;
+        _stateManager = stateManager;
         _logger = logger;
     }
 
@@ -32,9 +35,13 @@ public class SessionCleanupBackgroundService : BackgroundService
             try
             {
                 await Task.Delay(RunInterval, stoppingToken);
-                var removed = _sessionManager.CleanupStaleSessionsByPolicy(DmDisconnectedThreshold, InactivityThreshold);
-                if (removed > 0)
-                    _logger.LogInformation("Session cleanup removed {Count} stale session(s)", removed);
+                var removedIds = _sessionManager.CleanupStaleSessionsByPolicy(DmDisconnectedThreshold, InactivityThreshold);
+                if (removedIds.Count > 0)
+                {
+                    foreach (var id in removedIds)
+                        _stateManager.ClearSnapshot(id);
+                    _logger.LogInformation("Session cleanup removed {Count} stale session(s)", removedIds.Count);
+                }
             }
             catch (OperationCanceledException)
             {
