@@ -10,6 +10,7 @@ namespace DnDiscordAPI.Games.Character.Repositories
         Task<Models.Character> CreateAsync(Models.Character character);
         Task UpdateAsync(Models.Character character);
         Task DeleteAsync(Guid id);
+        Task<int> DeleteByUserIdAsync(string discordUserId);
     }
 
 
@@ -55,6 +56,13 @@ namespace DnDiscordAPI.Games.Character.Repositories
                 _context.Characters.Remove(character);
                 await _context.SaveChangesAsync();
             }
+        }
+
+        public async Task<int> DeleteByUserIdAsync(string discordUserId)
+        {
+            return await _context.Characters
+                .Where(c => c.DiscordUserId == discordUserId)
+                .ExecuteDeleteAsync();
         }
     }
 }

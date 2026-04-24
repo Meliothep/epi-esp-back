@@ -1,8 +1,7 @@
+using DnDiscord.Campaign.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace DnDiscord.Campaign.Services;
 
@@ -28,7 +27,7 @@ public class UserContextService : IUserContextService
     /// </summary>
     public Guid GetCurrentUserId()
     {
-        return ConvertDiscordIdToGuid(GetCurrentDiscordUserId());
+        return DiscordIdMapping.ToGuid(GetCurrentDiscordUserId());
     }
 
     /// <inheritdoc />
@@ -60,23 +59,11 @@ public class UserContextService : IUserContextService
         var user = _httpContextAccessor.HttpContext?.User;
         if (user == null) return string.Empty;
 
-        // Try the common claim names in order. Discord's token mapping doesn't
-        // always populate every slot, hence the cascade.
         return user.FindFirst("preferred_username")?.Value
             ?? user.FindFirst(ClaimTypes.Name)?.Value
             ?? user.FindFirst("name")?.Value
             ?? user.FindFirst("unique_name")?.Value
             ?? user.FindFirst("username")?.Value
             ?? string.Empty;
-    }
-
-    /// <summary>
-    /// Converts a Discord ID (string) to a deterministic Guid using MD5 hashing.
-    /// </summary>
-    private static Guid ConvertDiscordIdToGuid(string discordId)
-    {
-        using var md5 = MD5.Create();
-        var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(discordId));
-        return new Guid(hash);
     }
 }
