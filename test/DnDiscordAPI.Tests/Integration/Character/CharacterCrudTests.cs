@@ -103,6 +103,33 @@ public sealed class CharacterCrudTests
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Theory]
+    [InlineData("Barde")]
+    [InlineData("Clerc")]
+    [InlineData("Druide")]
+    [InlineData("Moine")]
+    [InlineData("Paladin")]
+    [InlineData("Ensorceleur")]
+    [InlineData("Sorcier")]
+    public async Task CreateCharacter_WithNonPlayableClass_ReturnsBadRequest(string nonPlayableClass)
+    {
+        var request = new
+        {
+            name = "Ghost",
+            @class = nonPlayableClass,
+            race = "Humain",
+            abilities = new
+            {
+                strength = 10, dexterity = 10, constitution = 10,
+                intelligence = 10, wisdom = 10, charisma = 10
+            }
+        };
+
+        var response = await _client.PostAsJsonAsync("/api/games/character", request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }
 
 public record CharacterTestResponse(
