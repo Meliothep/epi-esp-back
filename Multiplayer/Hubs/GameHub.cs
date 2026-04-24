@@ -18,6 +18,7 @@ public class GameHub : Hub
     private readonly MessageSequencer _messageSequencer;
     private readonly IUserContextService _userContextService;
     private readonly ICharacterLookupService _characterLookup;
+    private readonly ICharacterProgressionService _characterProgression;
     private readonly IInventoryGrantService _inventoryGrant;
     private readonly ICampaignMapLookupService _mapLookup;
     private readonly CombatManager _combatManager;
@@ -28,7 +29,8 @@ public class GameHub : Hub
     /// </summary>
     public GameHub(ILogger<GameHub> logger, SessionManager sessionManager, MessageSequencer messageSequencer,
         IUserContextService userContextService,
-        ICharacterLookupService characterLookup, IInventoryGrantService inventoryGrant,
+        ICharacterLookupService characterLookup, ICharacterProgressionService characterProgression,
+        IInventoryGrantService inventoryGrant,
         ICampaignMapLookupService mapLookup, CombatManager combatManager,
         SpawnPlacementService spawnPlacementService)
     {
@@ -37,6 +39,7 @@ public class GameHub : Hub
         _messageSequencer = messageSequencer;
         _userContextService = userContextService;
         _characterLookup = characterLookup;
+        _characterProgression = characterProgression;
         _inventoryGrant = inventoryGrant;
         _mapLookup = mapLookup;
         _combatManager = combatManager;
@@ -1113,6 +1116,182 @@ public class GameHub : Hub
     }
 
     /// <summary>
+    /// DM grants raw XP to a player character. XP is converted to one or more
+    /// level-ups by the progression service; the resulting stat snapshot is
+    /// broadcast through CharacterProgressed.
+    /// </summary>
+    public async Task DmAwardExperience(DmAwardExperiencePayload payload)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId)
+            ?? throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+
+        if (session.DmUserId != GetUserId())
+            throw new HubException("Only the DM can award XP");
+
+        if (payload.ExperienceAmount <= 0)
+            throw new HubException("ExperienceAmount must be > 0");
+
+        var targetPlayer = session.Players.FirstOrDefault(p => p.UserId == payload.TargetUserId)
+            ?? throw new HubException("Target player not found in session");
+
+        if (targetPlayer.SelectedCharacterId is not Guid characterId)
+            throw new HubException("Target player has not selected a character");
+
+        var result = await _characterProgression.AwardExperienceAsync(characterId, payload.ExperienceAmount);
+
+        await SyncCharacterHpToActiveUnitAsync(session, payload.TargetUserId, result.CurrentHitPoints, result.MaxHitPoints);
+
+        var progressed = new CharacterProgressedPayload
+        {
+            TargetUserId = payload.TargetUserId,
+            TargetUserName = targetPlayer.UserName ?? "Inconnu",
+            CharacterId = characterId,
+            AwardedExperience = result.AwardedExperience,
+            ExperienceRemainder = result.ExperienceRemainder,
+            PreviousLevel = result.PreviousLevel,
+            NewLevel = result.NewLevel,
+            LevelUps = result.LevelUps,
+            CurrentHitPoints = result.CurrentHitPoints,
+            MaxHitPoints = result.MaxHitPoints,
+            ArmorClass = result.ArmorClass,
+            Initiative = result.Initiative,
+            Speed = result.Speed,
+            Strength = result.Strength,
+            Dexterity = result.Dexterity,
+            Constitution = result.Constitution,
+            Intelligence = result.Intelligence,
+            Wisdom = result.Wisdom,
+            Charisma = result.Charisma,
+            Timestamp = DateTime.UtcNow,
+        };
+
+        _logger.LogInformation(
+            "DM {UserId} awarded {Xp} XP to {TargetUserId} in session {SessionId} ({Prev}->{New}, +{LevelUps} lvl)",
+            GetUserId(), payload.ExperienceAmount, payload.TargetUserId, sessionId,
+            result.PreviousLevel, result.NewLevel, result.LevelUps);
+
+        var message = _messageSequencer.CreateMessage(sessionId, "CharacterProgressed", progressed);
+        await Clients.Group(sessionId).SendAsync("CharacterProgressed", message);
+    }
+
+    /// <summary>
+    /// DM forces one or more level-ups for a player character.
+    /// </summary>
+    public async Task DmForceLevelUp(DmForceLevelUpPayload payload)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId)
+            ?? throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+
+        if (session.DmUserId != GetUserId())
+            throw new HubException("Only the DM can level up players");
+
+        if (payload.Levels <= 0)
+            throw new HubException("Levels must be > 0");
+
+        var targetPlayer = session.Players.FirstOrDefault(p => p.UserId == payload.TargetUserId)
+            ?? throw new HubException("Target player not found in session");
+
+        if (targetPlayer.SelectedCharacterId is not Guid characterId)
+            throw new HubException("Target player has not selected a character");
+
+        var result = await _characterProgression.ForceLevelUpAsync(characterId, payload.Levels);
+
+        await SyncCharacterHpToActiveUnitAsync(session, payload.TargetUserId, result.CurrentHitPoints, result.MaxHitPoints);
+
+        var progressed = new CharacterProgressedPayload
+        {
+            TargetUserId = payload.TargetUserId,
+            TargetUserName = targetPlayer.UserName ?? "Inconnu",
+            CharacterId = characterId,
+            AwardedExperience = 0,
+            ExperienceRemainder = result.ExperienceRemainder,
+            PreviousLevel = result.PreviousLevel,
+            NewLevel = result.NewLevel,
+            LevelUps = result.LevelUps,
+            CurrentHitPoints = result.CurrentHitPoints,
+            MaxHitPoints = result.MaxHitPoints,
+            ArmorClass = result.ArmorClass,
+            Initiative = result.Initiative,
+            Speed = result.Speed,
+            Strength = result.Strength,
+            Dexterity = result.Dexterity,
+            Constitution = result.Constitution,
+            Intelligence = result.Intelligence,
+            Wisdom = result.Wisdom,
+            Charisma = result.Charisma,
+            Timestamp = DateTime.UtcNow,
+        };
+
+        _logger.LogInformation(
+            "DM {UserId} forced {Levels} level-up(s) for {TargetUserId} in session {SessionId} ({Prev}->{New})",
+            GetUserId(), payload.Levels, payload.TargetUserId, sessionId,
+            result.PreviousLevel, result.NewLevel);
+
+        var message = _messageSequencer.CreateMessage(sessionId, "CharacterProgressed", progressed);
+        await Clients.Group(sessionId).SendAsync("CharacterProgressed", message);
+    }
+
+    /// <summary>
+    /// DM grants (or removes) gold from a player character wallet.
+    /// </summary>
+    public async Task DmGrantGold(DmGrantGoldPayload payload)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId)
+            ?? throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId)
+            ?? throw new HubException("Session not found");
+
+        if (session.DmUserId != GetUserId())
+            throw new HubException("Only the DM can grant gold");
+
+        var amount = payload.Amount != 0 ? payload.Amount : payload.GoldPieces;
+        if (amount == 0)
+            throw new HubException("Amount must not be 0");
+
+        var currencyType = (payload.CurrencyType ?? "gp").Trim().ToLowerInvariant();
+
+        var targetPlayer = session.Players.FirstOrDefault(p => p.UserId == payload.TargetUserId)
+            ?? throw new HubException("Target player not found in session");
+
+        if (targetPlayer.SelectedCharacterId is not Guid characterId)
+            throw new HubException("Target player has not selected a character");
+
+        var wallet = await _characterProgression.AdjustCurrencyAsync(characterId, currencyType, amount);
+
+        var goldGranted = new GoldGrantedPayload
+        {
+            TargetUserId = payload.TargetUserId,
+            TargetUserName = targetPlayer.UserName ?? "Inconnu",
+            CharacterId = characterId,
+            Amount = amount,
+            CurrencyType = currencyType,
+            GoldDelta = currencyType == "gp" ? amount : 0,
+            CopperPieces = wallet.CopperPieces,
+            SilverPieces = wallet.SilverPieces,
+            ElectrumPieces = wallet.ElectrumPieces,
+            GoldPieces = wallet.GoldPieces,
+            PlatinumPieces = wallet.PlatinumPieces,
+            TotalInCopper = wallet.TotalInCopper,
+            Timestamp = DateTime.UtcNow,
+        };
+
+        _logger.LogInformation(
+            "DM {UserId} adjusted currency by {Amount} {Currency} for {TargetUserId} in session {SessionId} (CP {CP}, SP {SP}, EP {EP}, GP {GP}, PP {PP})",
+            GetUserId(), amount, currencyType, payload.TargetUserId, sessionId,
+            wallet.CopperPieces, wallet.SilverPieces, wallet.ElectrumPieces, wallet.GoldPieces, wallet.PlatinumPieces);
+
+        var message = _messageSequencer.CreateMessage(sessionId, "GoldGranted", goldGranted);
+        await Clients.Group(sessionId).SendAsync("GoldGranted", message);
+    }
+
+    /// <summary>
     /// DM spawns a new enemy unit on the board. Broadcasts DmUnitSpawned to all players.
     /// </summary>
     public async Task DmSpawnUnit(DmSpawnUnitPayload payload)
@@ -1171,6 +1350,42 @@ public class GameHub : Hub
         // left the DM's client to guess whether the spawn succeeded.
         var message = _messageSequencer.CreateMessage(sessionId, "DmUnitSpawned", payload);
         await Clients.Group(sessionId).SendAsync("DmUnitSpawned", message);
+    }
+
+    private async Task SyncCharacterHpToActiveUnitAsync(
+        GameSession session,
+        Guid targetUserId,
+        int currentHp,
+        int maxHp)
+    {
+        UnitRuntimeState? unit;
+        await session.Combat.Lock.WaitAsync();
+        try
+        {
+            unit = session.Combat.Units.Values
+                .FirstOrDefault(u => u.OwnerUserId == targetUserId);
+
+            if (unit == null) return;
+
+            unit.MaxHp = maxHp;
+            unit.CurrentHp = Math.Clamp(currentHp, 0, maxHp);
+        }
+        finally
+        {
+            session.Combat.Lock.Release();
+        }
+
+        var hpPayload = new UnitHpAdjustedPayload
+        {
+            UnitId = unit.UnitId,
+            Hp = unit.CurrentHp,
+            MaxHp = unit.MaxHp,
+            IsAlive = unit.IsAlive,
+            Delta = 0,
+            WasAlive = unit.IsAlive,
+        };
+        var hpMessage = _messageSequencer.CreateMessage(session.SessionId, "UnitHpAdjusted", hpPayload);
+        await Clients.Group(session.SessionId).SendAsync("UnitHpAdjusted", hpMessage);
     }
 
     #endregion

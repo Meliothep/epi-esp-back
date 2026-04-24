@@ -64,6 +64,7 @@ namespace DnDiscordAPI.Games.Character.Services
                 Class = request.Class,
                 Race = request.Race,
                 Level = 1,
+                ExperiencePoints = 0,
                 Abilities = finalAbilities,
                 Wallet = new Wallet(),
                 CreatedAt = DateTime.UtcNow,
@@ -151,8 +152,14 @@ namespace DnDiscordAPI.Games.Character.Services
             if (character == null)
                 throw new KeyNotFoundException($"Character {characterId} not found");
 
+            var previousLevel = character.Level;
+
             // Augmenter le niveau
             character.Level++;
+
+            // Lightweight stat progression: every 4 levels, grant an ability-score
+            // increase according to class fantasy, capped to 20.
+            ApplyAbilityScoreIncrease(character);
 
             // Obtenir les traits de classe pour le calcul des HP
             var classTraits = character.GetClassTraits();
@@ -163,7 +170,12 @@ namespace DnDiscordAPI.Games.Character.Services
             var hpIncrease = newMaxHp - character.MaxHitPoints;
             
             character.MaxHitPoints = newMaxHp;
-            character.CurrentHitPoints += hpIncrease; // On augmente aussi les HP actuels
+            character.CurrentHitPoints = Math.Clamp(character.CurrentHitPoints + hpIncrease, 0, character.MaxHitPoints);
+
+            // Keep derived combat stats in sync with updated abilities.
+            character.ArmorClass = 10 + character.Abilities.GetModifier(character.Abilities.Dexterity);
+            character.Initiative = character.Abilities.GetModifier(character.Abilities.Dexterity);
+
             character.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
@@ -177,7 +189,66 @@ namespace DnDiscordAPI.Games.Character.Services
                 character.MaxHitPoints
             );
 
+            _logger.LogDebug(
+                "Character {Id} level-up details: {PreviousLevel}->{Level}, AC={ArmorClass}, Init={Initiative}, STR={Strength}, DEX={Dexterity}, CON={Constitution}, INT={Intelligence}, WIS={Wisdom}, CHA={Charisma}",
+                character.Id,
+                previousLevel,
+                character.Level,
+                character.ArmorClass,
+                character.Initiative,
+                character.Abilities.Strength,
+                character.Abilities.Dexterity,
+                character.Abilities.Constitution,
+                character.Abilities.Intelligence,
+                character.Abilities.Wisdom,
+                character.Abilities.Charisma);
+
             return _mapper.Map<CharacterDto>(character);
+        }
+
+        private static int ClampAbility(int value) => Math.Clamp(value, 1, 20);
+
+        private static void ApplyAbilityScoreIncrease(Models.Character character)
+        {
+            // D&D-like ASI cadence.
+            if (character.Level % 4 != 0) return;
+
+            switch (character.Class)
+            {
+                case Models.CharacterClass.Barbare:
+                case Models.CharacterClass.Guerrier:
+                case Models.CharacterClass.Paladin:
+                    character.Abilities.Strength = ClampAbility(character.Abilities.Strength + 2);
+                    break;
+
+                case Models.CharacterClass.Voleur:
+                case Models.CharacterClass.Rodeur:
+                    character.Abilities.Dexterity = ClampAbility(character.Abilities.Dexterity + 2);
+                    break;
+
+                case Models.CharacterClass.Moine:
+                    character.Abilities.Dexterity = ClampAbility(character.Abilities.Dexterity + 1);
+                    character.Abilities.Wisdom = ClampAbility(character.Abilities.Wisdom + 1);
+                    break;
+
+                case Models.CharacterClass.Barde:
+                case Models.CharacterClass.Ensorceleur:
+                case Models.CharacterClass.Sorcier:
+                    character.Abilities.Charisma = ClampAbility(character.Abilities.Charisma + 2);
+                    break;
+
+                case Models.CharacterClass.Clerc:
+                case Models.CharacterClass.Druide:
+                    character.Abilities.Wisdom = ClampAbility(character.Abilities.Wisdom + 2);
+                    break;
+
+                case Models.CharacterClass.Magicien:
+                    character.Abilities.Intelligence = ClampAbility(character.Abilities.Intelligence + 2);
+                    break;
+
+                default:
+                    break;
+            }
         }
 
         private int RollHitDie(string characterClass)

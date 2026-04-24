@@ -86,3 +86,79 @@ public class DmSpawnUnitPayload
     /// <summary>Serialised unit stats (JSON).</summary>
     public string StatsJson { get; set; } = string.Empty;
 }
+
+/// <summary>
+/// DM awards raw XP to a player character.
+/// </summary>
+public class DmAwardExperiencePayload
+{
+    public Guid TargetUserId { get; set; }
+    public int ExperienceAmount { get; set; }
+}
+
+/// <summary>
+/// DM forcibly triggers one or more level-ups for a player character.
+/// </summary>
+public class DmForceLevelUpPayload
+{
+    public Guid TargetUserId { get; set; }
+    public int Levels { get; set; } = 1;
+}
+
+/// <summary>
+/// DM grants (or removes) gold from a player character wallet.
+/// </summary>
+public class DmGrantGoldPayload
+{
+    public Guid TargetUserId { get; set; }
+    public int Amount { get; set; }
+    public string CurrencyType { get; set; } = "gp";
+    public int GoldPieces { get; set; }
+}
+
+/// <summary>
+/// Broadcast when DM-driven XP / level-up progression is applied.
+/// </summary>
+public class CharacterProgressedPayload
+{
+    public Guid TargetUserId { get; set; }
+    public string TargetUserName { get; set; } = string.Empty;
+    public Guid CharacterId { get; set; }
+    public int AwardedExperience { get; set; }
+    public int ExperienceRemainder { get; set; }
+    public int PreviousLevel { get; set; }
+    public int NewLevel { get; set; }
+    public int LevelUps { get; set; }
+    public int CurrentHitPoints { get; set; }
+    public int MaxHitPoints { get; set; }
+    public int ArmorClass { get; set; }
+    public int Initiative { get; set; }
+    public int Speed { get; set; }
+    public int Strength { get; set; }
+    public int Dexterity { get; set; }
+    public int Constitution { get; set; }
+    public int Intelligence { get; set; }
+    public int Wisdom { get; set; }
+    public int Charisma { get; set; }
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Broadcast when DM grants/removes gold.
+/// </summary>
+public class GoldGrantedPayload
+{
+    public Guid TargetUserId { get; set; }
+    public string TargetUserName { get; set; } = string.Empty;
+    public Guid CharacterId { get; set; }
+    public int Amount { get; set; }
+    public string CurrencyType { get; set; } = "gp";
+    public int GoldDelta { get; set; }
+    public int CopperPieces { get; set; }
+    public int SilverPieces { get; set; }
+    public int ElectrumPieces { get; set; }
+    public int GoldPieces { get; set; }
+    public int PlatinumPieces { get; set; }
+    public int TotalInCopper { get; set; }
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+}

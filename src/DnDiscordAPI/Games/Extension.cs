@@ -25,6 +25,7 @@ public static class GamesExtensions
         builder.Services.AddScoped<ICharacterService, CharacterService>();
         builder.Services.AddScoped<ICharacterRepository, CharacterRepository>();
         builder.Services.AddScoped<ICharacterLookupService, CharacterLookupAdapter>();
+        builder.Services.AddScoped<ICharacterProgressionService, CharacterProgressionAdapter>();
         builder.Services.AddScoped<IInventoryService, InventoryService>();
         builder.Services.AddScoped<IInventoryGrantService, InventoryGrantAdapter>();
         builder.Services.AddScoped<Multiplayer.Services.ICampaignMapLookupService, DnDiscordAPI.Campaign.CampaignMapLookupAdapter>();

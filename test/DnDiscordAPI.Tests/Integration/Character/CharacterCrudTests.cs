@@ -109,6 +109,7 @@ public record CharacterTestResponse(
     Guid Id,
     string Name,
     int Level,
+    int ExperiencePoints,
     string Class,
     string Race,
     int CurrentHitPoints,
