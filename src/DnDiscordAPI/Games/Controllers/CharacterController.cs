@@ -30,8 +30,15 @@ namespace DnDiscordAPI.Games.Controllers
             if (string.IsNullOrEmpty(discordUserId))
                 return Unauthorized(new { error = "User id missing in token" });
 
-            var character = await _characterService.CreateCharacterAsync(discordUserId, request);
-            return CreatedAtAction(nameof(GetCharacter), new { id = character.Id }, character);
+            try
+            {
+                var character = await _characterService.CreateCharacterAsync(discordUserId, request);
+                return CreatedAtAction(nameof(GetCharacter), new { id = character.Id }, character);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
         }
 
         [HttpGet("{id}")]
