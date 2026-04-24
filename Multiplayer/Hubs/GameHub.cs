@@ -660,31 +660,41 @@ public class GameHub : Hub
 
         // Compute server-authoritative ally spawn positions so all clients start
         // on the same squares regardless of when their GameStarted arrives.
+        // Wrapped in try/catch so a placement bug never leaves the session
+        // half-seeded with InProgress set but GameStarted never broadcast.
         if (assignments.Count > 0 && !string.IsNullOrEmpty(mapData))
         {
-            var placer = _spawnPlacementService;
-            var (walkable, spawnZones, gridWidth, gridHeight) = placer.BuildWalkableGrid(mapData);
-            var seedBytes = Guid.Parse(sessionId).ToByteArray();
-            var placementSeed = BitConverter.ToInt32(seedBytes, 0);
-            var positions = placer.GetSpawnPositions(
-                walkable, spawnZones, new HashSet<string>(),
-                "ally", assignments.Count, gridWidth, gridHeight, placementSeed);
-
-            for (var i = 0; i < positions.Count && i < assignments.Count; i++)
+            try
             {
-                var pos = positions[i];
-                assignments[i].StartX = pos.X;
-                assignments[i].StartY = pos.Y;
-                // Mirror into the live combat roster.
-                if (session.Combat.Units.TryGetValue(assignments[i].UnitId, out var unit))
-                {
-                    unit.PositionX = pos.X;
-                    unit.PositionY = pos.Y;
-                }
-            }
+                var placer = _spawnPlacementService;
+                var (walkable, spawnZones, gridWidth, gridHeight) = placer.BuildWalkableGrid(mapData);
+                var placementSeed = SpawnPlacementService.StableSeedFromString(sessionId);
+                var positions = placer.GetSpawnPositions(
+                    walkable, spawnZones, new HashSet<string>(),
+                    "ally", assignments.Count, gridWidth, gridHeight, placementSeed);
 
-            _logger.LogInformation("Ally placement seeded session {SessionId} with {Count} positions",
-                sessionId, positions.Count);
+                for (var i = 0; i < positions.Count && i < assignments.Count; i++)
+                {
+                    var pos = positions[i];
+                    assignments[i].StartX = pos.X;
+                    assignments[i].StartY = pos.Y;
+                    // Mirror into the live combat roster.
+                    if (session.Combat.Units.TryGetValue(assignments[i].UnitId, out var unit))
+                    {
+                        unit.PositionX = pos.X;
+                        unit.PositionY = pos.Y;
+                    }
+                }
+
+                _logger.LogInformation("Ally placement seeded session {SessionId} with {Count} positions",
+                    sessionId, positions.Count);
+            }
+            catch (Exception ex)
+            {
+                // Placement failure must not abort the start — clients fall back
+                // to their local legacy anchors when StartX/StartY are absent.
+                _logger.LogError(ex, "Ally placement failed for session {SessionId}; continuing with absent positions", sessionId);
+            }
         }
 
         var payload = new GameStartedPayload

@@ -252,6 +252,24 @@ public class SpawnPlacementService
         return new GridPosition(x, z);
     }
 
+    /// <summary>
+    /// Deterministic 32-bit hash of a UTF-8 string via FNV-1a. Used to derive a
+    /// placement seed from a session id so every client picks the same cells.
+    /// Stable across .NET process restarts (unlike <see cref="string.GetHashCode"/>).
+    /// </summary>
+    public static int StableSeedFromString(string s)
+    {
+        const uint FNV_OFFSET = 2166136261u;
+        const uint FNV_PRIME = 16777619u;
+        var hash = FNV_OFFSET;
+        foreach (var b in System.Text.Encoding.UTF8.GetBytes(s))
+        {
+            hash ^= b;
+            hash = unchecked(hash * FNV_PRIME);
+        }
+        return unchecked((int)hash);
+    }
+
     private static Func<double> Mulberry32(int seed)
     {
         uint a = (uint)seed;

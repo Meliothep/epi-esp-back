@@ -248,6 +248,35 @@ public class SpawnPlacementTests
     }
 
     // ---------------------------------------------------------------------------
+    // StableSeedFromString
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public void StableSeedFromString_is_deterministic_across_calls()
+    {
+        var a = SpawnPlacementService.StableSeedFromString("session_3afa857126ef44828e6d4c0c114a7dad");
+        var b = SpawnPlacementService.StableSeedFromString("session_3afa857126ef44828e6d4c0c114a7dad");
+        Assert.Equal(a, b);
+    }
+
+    [Fact]
+    public void StableSeedFromString_differs_across_distinct_inputs()
+    {
+        var a = SpawnPlacementService.StableSeedFromString("session_a");
+        var b = SpawnPlacementService.StableSeedFromString("session_b");
+        Assert.NotEqual(a, b);
+    }
+
+    [Fact]
+    public void StableSeedFromString_accepts_non_guid_shaped_strings()
+    {
+        // Repro for the live bug: sessionId format is "session_<hex>", not a GUID.
+        var seed = SpawnPlacementService.StableSeedFromString("session_3afa857126ef44828e6d4c0c114a7dad");
+        // Just assert it doesn't throw and produces a signed 32-bit int.
+        Assert.InRange(seed, int.MinValue, int.MaxValue);
+    }
+
+    // ---------------------------------------------------------------------------
     // helpers
     // ---------------------------------------------------------------------------
 
