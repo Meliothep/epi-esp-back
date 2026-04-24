@@ -1291,6 +1291,27 @@ public class GameHub : Hub
             session.PendingRolls.TryRemove(pending.RequestId, out _);
     }
 
+    public async Task DmCancelRollRequest(Guid requestId)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null) throw new HubException("Not in a session");
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null) throw new HubException("Session not found");
+
+        if (session.DmUserId != GetUserId())
+            throw new HubException("Only the DM can cancel a roll");
+
+        if (!session.PendingRolls.TryRemove(requestId, out var pending))
+            return; // idempotent — already closed
+
+        await Clients.Group(sessionId).SendAsync(
+            "RollCanceled",
+            new RollCanceledPayload(
+                requestId,
+                pending.Label,
+                pending.PendingUserIds.ToList()));
+    }
+
     #endregion
 
     #region [== Messages de jeu ==]
