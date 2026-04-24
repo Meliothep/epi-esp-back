@@ -212,64 +212,64 @@ public class GameHub : Hub
 
             if (isDmUser)
             {
-                await Clients.Caller.SendAsync(
-                    "RollRequestedDmEcho",
-                    new RollRequestedDmEchoPayload(
-                        pending.RequestId,
-                        pending.DiceType,
-                        pending.Label,
-                        pending.RollValues.Keys.ToList(),
-                        pending.RollValues.Count));
+                var rejoinDmEchoPayload = new RollRequestedDmEchoPayload(
+                    pending.RequestId,
+                    pending.DiceType,
+                    pending.Label,
+                    pending.RollValues.Keys.ToList(),
+                    pending.RollValues.Count);
+                var rejoinDmEchoMessage = _messageSequencer.CreateMessage(session.SessionId, "RollRequestedDmEcho", rejoinDmEchoPayload);
+                await Clients.Caller.SendAsync("RollRequestedDmEcho", rejoinDmEchoMessage);
 
                 foreach (var (submittedUserId, submittedValue) in pending.SnapshotSubmittedValues())
                 {
                     var p = session.Players.FirstOrDefault(pp => pp.UserId == submittedUserId);
-                    await Clients.Caller.SendAsync(
-                        "RollResultBroadcast",
-                        new RollResultBroadcastPayload(
-                            pending.RequestId,
-                            submittedUserId,
-                            p?.UserName,
-                            pending.DiceType,
-                            submittedValue,
-                            pending.Label,
-                            false)); // RequestComplete=false during replay — real completion already occurred
+                    var rejoinDmResultPayload = new RollResultBroadcastPayload(
+                        pending.RequestId,
+                        submittedUserId,
+                        p?.UserName,
+                        pending.DiceType,
+                        submittedValue,
+                        pending.Label,
+                        false); // RequestComplete=false during replay — real completion already occurred
+                    var rejoinDmResultMessage = _messageSequencer.CreateMessage(session.SessionId, "RollResultBroadcast", rejoinDmResultPayload);
+                    await Clients.Caller.SendAsync("RollResultBroadcast", rejoinDmResultMessage);
                 }
             }
             else if (isTarget && stillPending)
             {
-                await Clients.Caller.SendAsync(
-                    "RollRequested",
-                    new RollRequestedPayload(
-                        pending.RequestId,
-                        pending.DiceType,
-                        pending.Label,
-                        pending.RollValues[userId]));
+                var rejoinRollRequestedPayload = new RollRequestedPayload(
+                    pending.RequestId,
+                    pending.DiceType,
+                    pending.Label,
+                    pending.RollValues[userId]);
+                var rejoinRollRequestedMessage = _messageSequencer.CreateMessage(session.SessionId, "RollRequested", rejoinRollRequestedPayload);
+                await Clients.Caller.SendAsync("RollRequested", rejoinRollRequestedMessage);
             }
             else
             {
-                await Clients.Caller.SendAsync(
-                    "RollRequestedPublic",
-                    new RollRequestedPublicPayload(
-                        pending.RequestId,
-                        pending.DiceType,
-                        pending.Label,
-                        pending.RollValues.Keys.ToList(),
-                        pending.RollValues.Count));
+                var rejoinPublicPayload = new RollRequestedPublicPayload(
+                    pending.RequestId,
+                    pending.DiceType,
+                    pending.Label,
+                    pending.RollValues.Keys.ToList(),
+                    pending.RollValues.Count);
+                var rejoinPublicMessage = _messageSequencer.CreateMessage(session.SessionId, "RollRequestedPublic", rejoinPublicPayload);
+                await Clients.Caller.SendAsync("RollRequestedPublic", rejoinPublicMessage);
 
                 foreach (var (submittedUserId, submittedValue) in pending.SnapshotSubmittedValues())
                 {
                     var p = session.Players.FirstOrDefault(pp => pp.UserId == submittedUserId);
-                    await Clients.Caller.SendAsync(
-                        "RollResultBroadcast",
-                        new RollResultBroadcastPayload(
-                            pending.RequestId,
-                            submittedUserId,
-                            p?.UserName,
-                            pending.DiceType,
-                            submittedValue,
-                            pending.Label,
-                            false));
+                    var rejoinPublicResultPayload = new RollResultBroadcastPayload(
+                        pending.RequestId,
+                        submittedUserId,
+                        p?.UserName,
+                        pending.DiceType,
+                        submittedValue,
+                        pending.Label,
+                        false);
+                    var rejoinPublicResultMessage = _messageSequencer.CreateMessage(session.SessionId, "RollResultBroadcast", rejoinPublicResultPayload);
+                    await Clients.Caller.SendAsync("RollResultBroadcast", rejoinPublicResultMessage);
                 }
             }
         }
@@ -321,12 +321,9 @@ public class GameHub : Hub
                 {
                     if (session.PendingRolls.TryRemove(requestId, out var pending))
                     {
-                        await Clients.Group(sessionId).SendAsync(
-                            "RollCanceled",
-                            new RollCanceledPayload(
-                                requestId,
-                                pending.Label,
-                                pending.PendingUserIds.ToList()));
+                        var disconnectCancelPayload = new RollCanceledPayload(requestId, pending.Label, pending.PendingUserIds.ToList());
+                        var disconnectCancelMessage = _messageSequencer.CreateMessage(sessionId, "RollCanceled", disconnectCancelPayload);
+                        await Clients.Group(sessionId).SendAsync("RollCanceled", disconnectCancelMessage);
                     }
                 }
             }
@@ -1331,20 +1328,18 @@ public class GameHub : Hub
 
         foreach (var (uid, val) in values)
         {
-            await Clients.User(uid.ToString()).SendAsync(
-                "RollRequested",
-                new RollRequestedPayload(requestId, "d20", payload.Label, val));
+            var rollRequestedPayload = new RollRequestedPayload(requestId, "d20", payload.Label, val);
+            var rollRequestedMessage = _messageSequencer.CreateMessage(sessionId, "RollRequested", rollRequestedPayload);
+            await Clients.User(uid.ToString()).SendAsync("RollRequested", rollRequestedMessage);
         }
 
-        await Clients.User(session.DmUserId.ToString()).SendAsync(
-            "RollRequestedDmEcho",
-            new RollRequestedDmEchoPayload(
-                requestId, "d20", payload.Label, targets, targets.Count));
+        var dmEchoPayload = new RollRequestedDmEchoPayload(requestId, "d20", payload.Label, targets, targets.Count);
+        var dmEchoMessage = _messageSequencer.CreateMessage(sessionId, "RollRequestedDmEcho", dmEchoPayload);
+        await Clients.User(session.DmUserId.ToString()).SendAsync("RollRequestedDmEcho", dmEchoMessage);
 
-        await Clients.Group(sessionId).SendAsync(
-            "RollRequestedPublic",
-            new RollRequestedPublicPayload(
-                requestId, "d20", payload.Label, targets, targets.Count));
+        var publicPayload = new RollRequestedPublicPayload(requestId, "d20", payload.Label, targets, targets.Count);
+        var publicMessage = _messageSequencer.CreateMessage(sessionId, "RollRequestedPublic", publicPayload);
+        await Clients.Group(sessionId).SendAsync("RollRequestedPublic", publicMessage);
     }
 
     public async Task SubmitRollResult(SubmitRollResultPayload payload)
@@ -1374,16 +1369,16 @@ public class GameHub : Hub
 
         var player = session.Players.FirstOrDefault(p => p.UserId == userId);
 
-        await Clients.Group(sessionId).SendAsync(
-            "RollResultBroadcast",
-            new RollResultBroadcastPayload(
-                pending.RequestId,
-                userId,
-                player?.UserName,
-                pending.DiceType,
-                value,
-                pending.Label,
-                complete));
+        var rollResultPayload = new RollResultBroadcastPayload(
+            pending.RequestId,
+            userId,
+            player?.UserName,
+            pending.DiceType,
+            value,
+            pending.Label,
+            complete);
+        var rollResultMessage = _messageSequencer.CreateMessage(sessionId, "RollResultBroadcast", rollResultPayload);
+        await Clients.Group(sessionId).SendAsync("RollResultBroadcast", rollResultMessage);
 
         if (complete)
             session.PendingRolls.TryRemove(pending.RequestId, out _);
@@ -1402,12 +1397,9 @@ public class GameHub : Hub
         if (!session.PendingRolls.TryRemove(requestId, out var pending))
             return; // idempotent — already closed
 
-        await Clients.Group(sessionId).SendAsync(
-            "RollCanceled",
-            new RollCanceledPayload(
-                requestId,
-                pending.Label,
-                pending.PendingUserIds.ToList()));
+        var cancelPayload = new RollCanceledPayload(requestId, pending.Label, pending.PendingUserIds.ToList());
+        var cancelMessage = _messageSequencer.CreateMessage(sessionId, "RollCanceled", cancelPayload);
+        await Clients.Group(sessionId).SendAsync("RollCanceled", cancelMessage);
     }
 
     #endregion
