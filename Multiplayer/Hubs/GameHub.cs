@@ -30,7 +30,8 @@ public class GameHub : Hub
     /// </summary>
     public GameHub(ILogger<GameHub> logger, SessionManager sessionManager, MessageSequencer messageSequencer,
         StateManager stateManager, IGameActionValidator validator, IUserContextService userContextService,
-        ICharacterLookupService characterLookup)
+        ICharacterLookupService characterLookup, IInventoryGrantService inventoryGrant,
+        ICampaignMapLookupService mapLookup, CombatManager combatManager, SpawnPlacementService spawnPlacementService)
     {
         _logger = logger;
         _sessionManager = sessionManager;
@@ -1009,28 +1010,20 @@ public class GameHub : Hub
             throw new HubException("Session not found");
 
         var userId = GetUserId();
-        var validation = _validator.ValidateMove(session, request, userId);
-        if (!validation.IsValid)
+        if (session.DmUserId != userId)
+            throw new HubException("Only the DM can move tokens");
+
+        if (payload == null || string.IsNullOrWhiteSpace(payload.UnitId) || payload.Target == null)
+            throw new HubException("Invalid payload");
+
+        if (session.Combat.Units.TryGetValue(payload.UnitId, out var unit))
         {
-            return new MoveResult
-            {
-                UnitId = request.UnitId,
-                Success = false,
-                Error = validation.ErrorMessage ?? validation.ErrorCode
-            };
+            unit.PositionX = payload.Target.X;
+            unit.PositionY = payload.Target.Y;
         }
 
-        var result = new MoveResult
-        {
-            UnitId = request.UnitId,
-            Path = request.Path ?? new List<GridPosition>(),
-            ApCost = 1,
-            Success = true
-        };
-
-        var message = _messageSequencer.CreateMessage(sessionId, "UnitMoved", result);
-        await Clients.Group(sessionId).SendAsync("UnitMoved", message);
-        return result;
+        var message = _messageSequencer.CreateMessage(sessionId, "DmTokenMoved", payload);
+        await Clients.Group(sessionId).SendAsync("DmTokenMoved", message);
     }
 
     /// <summary>
@@ -1198,8 +1191,6 @@ public class GameHub : Hub
 
         var message = _messageSequencer.CreateMessage(sessionId, "TurnEnded", outgoing);
         await Clients.Group(sessionId).SendAsync("TurnEnded", message);
-
-        await TryRunEnemyTurnsFromSnapshot(sessionId);
     }
 
     /// <summary>
@@ -1263,12 +1254,12 @@ public class GameHub : Hub
             throw new HubException("Not in a session");
         }
 
-        var message = _messageSequencer.CreateMessage(sessionId, "TurnEnded", payload);
+        var message = _messageSequencer.CreateMessage(sessionId, "AbilityUsed", payload);
 
-        _logger.LogDebug("Turn ended for unit {UnitId} in session {SessionId}",
+        _logger.LogDebug("Ability used by unit {UnitId} in session {SessionId}",
             payload.UnitId, sessionId);
 
-        await Clients.Group(sessionId).SendAsync("TurnEnded", message);
+        await Clients.Group(sessionId).SendAsync("AbilityUsed", message);
     }
 
     /// <summary>
@@ -1297,121 +1288,23 @@ public class GameHub : Hub
         if (sessionId == null)
             throw new HubException("Not in a session");
 
-        var snapshot = _stateManager.GetSnapshot(sessionId)
-            ?? new GameStateSnapshot { SessionId = sessionId };
-
-        var message = _messageSequencer.CreateMessage(sessionId, "AbilityUsed", payload);
-
-        _logger.LogInformation("Ability {AbilityId} used by unit {UnitId} in session {SessionId} — {TargetCount} target(s), {TotalDamage} dmg",
-            payload.AbilityId, payload.UnitId, sessionId,
-            payload.Effects.Count,
-            payload.Effects.Sum(e => e.Value));
-
-        await Clients.Group(sessionId).SendAsync("AbilityUsed", message);
-    }
-
-    private async Task TryRunEnemyTurnsFromSnapshot(string sessionId)
-    {
         var snapshot = _stateManager.GetSnapshot(sessionId);
-        var combat = snapshot?.CombatState;
-        if (snapshot == null || combat == null) return;
-        if (!combat.IsActive) return;
-        if (combat.InitiativeOrder == null || combat.InitiativeOrder.Count == 0) return;
-
-        // Safety: avoid infinite loops
-        for (var guard = 0; guard < 10; guard++)
+        if (snapshot == null)
         {
-            var currentUnitId = combat.CurrentUnitId;
-            if (string.IsNullOrWhiteSpace(currentUnitId)) return;
-            if (!currentUnitId.StartsWith("enemy_", StringComparison.OrdinalIgnoreCase)) return;
-
-            var enemy = snapshot.Units.FirstOrDefault(u => string.Equals(u.UnitId, currentUnitId, StringComparison.OrdinalIgnoreCase));
-            if (enemy == null) return;
-
-            // Find nearest player
-            var players = snapshot.Units.Where(u => u.UnitId.StartsWith("player_", StringComparison.OrdinalIgnoreCase)).ToList();
-            if (players.Count == 0) return;
-            UnitState nearest = players[0];
-            var bestDist = int.MaxValue;
-            foreach (var p in players)
-            {
-                var d = Math.Abs(p.Position.X - enemy.Position.X) + Math.Abs(p.Position.Y - enemy.Position.Y);
-                if (d < bestDist)
-                {
-                    bestDist = d;
-                    nearest = p;
-                }
-            }
-
-            // If adjacent, do a simple attack (fixed damage)
-            if (bestDist <= 1)
-            {
-                var damage = 8;
-                nearest.Hp = Math.Max(0, nearest.Hp - damage);
-
-                var attackResult = new AttackResult
-                {
-                    AttackerId = enemy.UnitId,
-                    TargetId = nearest.UnitId,
-                    AbilityId = "enemy_basic_attack",
-                    DiceRoll = 0,
-                    Modifier = 0,
-                    Hit = true,
-                    Damage = damage,
-                    Effects = null,
-                    Success = true
-                };
-                var attackMsg = _messageSequencer.CreateMessage(sessionId, "AttackResolved", attackResult);
-                await Clients.Group(sessionId).SendAsync("AttackResolved", attackMsg);
-            }
-            else
-            {
-                // Move 1 step toward the nearest player (no map validation in MVP snapshot-AI)
-                var dx = Math.Sign(nearest.Position.X - enemy.Position.X);
-                var dy = Math.Sign(nearest.Position.Y - enemy.Position.Y);
-
-                // Prefer X movement then Y
-                var target = new GridPosition(enemy.Position.X + dx, enemy.Position.Y);
-                if (dx == 0) target = new GridPosition(enemy.Position.X, enemy.Position.Y + dy);
-
-                // Avoid moving onto an occupied tile (based on snapshot)
-                var occupied = snapshot.Units.Any(u => !string.Equals(u.UnitId, enemy.UnitId, StringComparison.OrdinalIgnoreCase)
-                                                      && u.Position.X == target.X && u.Position.Y == target.Y
-                                                      && u.Hp > 0);
-                if (!occupied)
-                {
-                    var start = enemy.Position;
-                    enemy.Position = target;
-                    _positions.SetPosition(sessionId, enemy.UnitId, target);
-
-                    var moveResult = new MoveResult
-                    {
-                        UnitId = enemy.UnitId,
-                        Path = new List<GridPosition> { start, target },
-                        ApCost = 1,
-                        Success = true
-                    };
-                    var moveMsg = _messageSequencer.CreateMessage(sessionId, "UnitMoved", moveResult);
-                    await Clients.Group(sessionId).SendAsync("UnitMoved", moveMsg);
-                }
-            }
-
-            // Advance to next unit in initiative order
-            var idx = combat.InitiativeOrder.FindIndex(e => string.Equals(e.UnitId, currentUnitId, StringComparison.OrdinalIgnoreCase));
-            if (idx < 0) return;
-            var nextIdx = (idx + 1) % combat.InitiativeOrder.Count;
-            combat.CurrentUnitId = combat.InitiativeOrder[nextIdx].UnitId;
-
-            // Persist updated snapshot so clients can RequestFullState
-            snapshot.LastSequenceNumber = Math.Max(snapshot.LastSequenceNumber, 0);
+            var session = _sessionManager.GetSession(sessionId);
+            snapshot = session == null
+                ? new GameStateSnapshot { SessionId = sessionId }
+                : GameStateSnapshot.FromSession(session);
             _stateManager.SetSnapshot(sessionId, snapshot);
-
-            // Broadcast enemy turn ended (optional for client UI)
-            var endPayload = new TurnEndedPayload { UnitId = currentUnitId };
-            var endMsg = _messageSequencer.CreateMessage(sessionId, "TurnEnded", endPayload);
-            await Clients.Group(sessionId).SendAsync("TurnEnded", endMsg);
         }
+
+        var message = _messageSequencer.CreateMessage(sessionId, "FullStateSync", snapshot);
+        await Clients.Caller.SendAsync("FullStateSync", message);
+        return message;
     }
+
+    // NOTE: a previous "enemy AI from snapshot" POC lived here.
+    // It referenced non-existent snapshot types and was removed to keep the hub buildable.
 
     #endregion
 }
