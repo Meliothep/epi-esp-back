@@ -35,6 +35,16 @@ namespace Multiplayer.Models.Messages
         /// Effets appliqués par la capacité
         /// </summary>
         public List<AbilityEffect> Effects { get; set; } = new();
+
+        /// <summary>
+        /// Coût en points d'action (déduit de l'attaquant par les peers).
+        /// </summary>
+        public int ApCost { get; set; }
+
+        /// <summary>
+        /// Cooldown à appliquer sur la capacité utilisée (en tours).
+        /// </summary>
+        public int Cooldown { get; set; }
     }
 
     /// <summary>

@@ -9,6 +9,7 @@
         public CharacterClass Class { get; set; }
         public CharacterRace Race { get; set; }
         public AbilityScores Abilities { get; set; }
+        public Wallet Wallet { get; set; }
         public int MaxHitPoints { get; set; }
         public int CurrentHitPoints { get; set; }
         public int ArmorClass { get; set; }

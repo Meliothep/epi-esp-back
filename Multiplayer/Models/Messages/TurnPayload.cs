@@ -2,7 +2,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using static Multiplayer.Define;
+using Multiplayer.Models;
 
 namespace Multiplayer.Models.Messages
 {
@@ -15,6 +18,27 @@ namespace Multiplayer.Models.Messages
         /// ID de l'unité qui termine son tour
         /// </summary>
         public string UnitId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Server-authoritative fields filled in by the hub after advancing the
+        /// cursor. Clients read these verbatim — no local nextTurn() call.
+        /// </summary>
+        public string? NextUnitId { get; set; }
+
+        [JsonConverter(typeof(JsonStringEnumConverter))]
+        public CombatPhase Phase { get; set; } = CombatPhase.PlayerTurn;
+
+        public int Round { get; set; } = 1;
+
+        [JsonConverter(typeof(JsonStringEnumConverter))]
+        public CombatResult? Outcome { get; set; }
+
+        /// <summary>
+        /// Full unit snapshot after the server advanced the cursor. Carries the
+        /// AP reset that fires when the round wraps — without this field clients
+        /// never see the refresh and AP stays at 0 forever.
+        /// </summary>
+        public List<UnitRuntimeState>? Units { get; set; }
     }
 
     /// <summary>

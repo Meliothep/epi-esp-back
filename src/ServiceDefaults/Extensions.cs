@@ -50,12 +50,24 @@ public static class Extensions
 
     public static IHostApplicationBuilder ConfigureSerilog(this IHostApplicationBuilder builder)
     {
-        Log.Logger = new LoggerConfiguration()
+        var config = new LoggerConfiguration()
                     .Enrich.FromLogContext()
                     .WriteTo.Console()
-                    .WriteTo.Seq(builder.Configuration["Seq"]!)
-                    .CreateLogger();
+                    .WriteTo.Seq(builder.Configuration["Seq"]!);
 
+        if (builder.Environment.IsDevelopment())
+        {
+            var logDir = Path.Combine(builder.Environment.ContentRootPath, "logs");
+            Directory.CreateDirectory(logDir);
+            config = config.WriteTo.File(
+                path: Path.Combine(logDir, "back-.log"),
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 7,
+                shared: true,
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext} {Message:lj}{NewLine}{Exception}");
+        }
+
+        Log.Logger = config.CreateLogger();
         builder.Services.AddSerilog();
 
         return builder;

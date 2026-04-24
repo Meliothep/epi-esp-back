@@ -31,5 +31,8 @@ namespace Multiplayer.Models
         public ConnectionStatus Status { get; set; }
         public Guid? SelectedCharacterId { get; set; }
         public string? SelectedCharacterName { get; set; }
+
+        /// <summary>Lobby quickstart preset key: "warrior" | "mage" | "archer" | null.</summary>
+        public string? SelectedDefaultTemplate { get; set; }
     }
 }

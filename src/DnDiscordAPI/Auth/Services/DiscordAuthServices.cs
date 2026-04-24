@@ -7,6 +7,16 @@ public interface IDiscordAuthService
 {
     Task<DiscordUserData?> GetUserDataAsync(string accessToken);
     Task<string?> ExchangeCodeForTokenAsync(string code, string? redirectUri = null);
+
+    /// <summary>
+    /// Révoque un token d'accès Discord via POST /oauth2/token/revoke.
+    /// Fire-and-forget : le back ne persiste pas ce token, donc une fois
+    /// les user data récupérées il n'a plus aucune utilité. Révoquer
+    /// côté Discord ferme proprement l'autorisation et évite de laisser
+    /// traîner un token inutile. Les erreurs sont avalées (best-effort).
+    /// Référence : https://discord.com/developers/docs/topics/oauth2#revoke-tokens
+    /// </summary>
+    Task RevokeAccessTokenAsync(string accessToken);
 }
 
 public class DiscordAuthService : IDiscordAuthService
@@ -119,6 +129,35 @@ public class DiscordAuthService : IDiscordAuthService
         {
             _logger.LogError($"[DISCORD_AUTH] Exception in GetUserDataAsync: {ex.Message}\n{ex.StackTrace}");
             return null;
+        }
+    }
+
+    public async Task RevokeAccessTokenAsync(string accessToken)
+    {
+        if (string.IsNullOrEmpty(accessToken)) return;
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, "https://discord.com/api/oauth2/token/revoke");
+            request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                { "client_id", _clientId },
+                { "client_secret", _clientSecret },
+                { "token", accessToken },
+                { "token_type_hint", "access_token" },
+            });
+            var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[DISCORD_AUTH] Token revoke returned {Status}", response.StatusCode);
+                return;
+            }
+            _logger.LogInformation("[DISCORD_AUTH] Token revoked (opportunistic)");
+        }
+        catch (Exception ex)
+        {
+            // Best-effort : on ne doit jamais casser le callback à cause
+            // de cette révocation opportuniste.
+            _logger.LogWarning(ex, "[DISCORD_AUTH] Opportunistic token revoke failed");
         }
     }
 

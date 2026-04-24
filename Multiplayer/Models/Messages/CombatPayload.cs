@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using static Multiplayer.Define;
 
@@ -21,6 +22,17 @@ public class CombatStartedPayload
     /// Liste des ennemis
     /// </summary>
     public List<EnemyInfo> Enemies { get; set; } = new();
+
+    /// <summary>
+    /// Server-authoritative combat state. Clients read these fields verbatim —
+    /// no local initiative computation. Added with the hub-authoritative rework.
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public CombatPhase Phase { get; set; } = CombatPhase.PlayerTurn;
+    public int Round { get; set; } = 1;
+    public string? CurrentUnitId { get; set; }
+    public List<string> TurnOrder { get; set; } = new();
+    public List<Models.UnitRuntimeState> Units { get; set; } = new();
 }
 
 /// <summary>
