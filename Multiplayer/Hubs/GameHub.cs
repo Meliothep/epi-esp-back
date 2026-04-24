@@ -1249,6 +1249,48 @@ public class GameHub : Hub
                 requestId, "d20", payload.Label, targets, targets.Count));
     }
 
+    public async Task SubmitRollResult(SubmitRollResultPayload payload)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null) throw new HubException("Not in a session");
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null) throw new HubException("Session not found");
+
+        var userId = GetUserId();
+
+        if (!session.PendingRolls.TryGetValue(payload.RequestId, out var pending))
+        {
+            _logger.LogWarning(
+                "SubmitRollResult ignored: requestId {RequestId} not found (user {UserId}, session {SessionId})",
+                payload.RequestId, userId, sessionId);
+            return;
+        }
+
+        if (!pending.TrySubmit(userId, out var value, out var complete))
+        {
+            _logger.LogWarning(
+                "SubmitRollResult ignored by TrySubmit: requestId {RequestId}, user {UserId}",
+                payload.RequestId, userId);
+            return;
+        }
+
+        var player = session.Players.FirstOrDefault(p => p.UserId == userId);
+
+        await Clients.Group(sessionId).SendAsync(
+            "RollResultBroadcast",
+            new RollResultBroadcastPayload(
+                pending.RequestId,
+                userId,
+                player?.UserName,
+                pending.DiceType,
+                value,
+                pending.Label,
+                complete));
+
+        if (complete)
+            session.PendingRolls.TryRemove(pending.RequestId, out _);
+    }
+
     #endregion
 
     #region [== Messages de jeu ==]
