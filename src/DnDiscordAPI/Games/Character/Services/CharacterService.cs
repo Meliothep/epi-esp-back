@@ -2,6 +2,7 @@
 using DnDiscordAPI.Games.Character.DTOs;
 using DnDiscordAPI.Games.Character.Models;
 using DnDiscordAPI.Games.Database;
+using DnDiscordAPI.Messages.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace DnDiscordAPI.Games.Character.Services
@@ -13,22 +14,33 @@ namespace DnDiscordAPI.Games.Character.Services
         Task<List<CharacterDto>> GetUserCharactersAsync(string discordUserId);
         Task<CharacterDto> UpdateHitPointsAsync(Guid characterId, int newHitPoints);
         Task<CharacterDto> LevelUpAsync(Guid characterId);
+        Task<WalletDto> GetWalletAsync(Guid characterId);
+        Task<WalletDto> ModifyWalletAsync(Guid characterId, ModifyWalletRequest request);
+
+        /// <summary>
+        /// Returns the Discord user id string that owns the character, or null if the character
+        /// doesn't exist. Projection-only query — doesn't materialise the full entity.
+        /// </summary>
+        Task<string?> GetOwnerDiscordIdAsync(Guid characterId);
     }
 
 
     public class CharacterService : ICharacterService
     {
-        private readonly GamesDbContext _context; 
-        private readonly IMapper _mapper; 
+        private readonly GamesDbContext _context;
+        private readonly IMapper _mapper;
+        private readonly SignalRService _signalR;
         private readonly ILogger<CharacterService> _logger;
 
         public CharacterService(
-            GamesDbContext context, 
+            GamesDbContext context,
             IMapper mapper,
+            SignalRService signalR,
             ILogger<CharacterService> logger)
         {
             _context = context;
             _mapper = mapper;
+            _signalR = signalR;
             _logger = logger;
         }
 
@@ -53,6 +65,7 @@ namespace DnDiscordAPI.Games.Character.Services
                 Race = request.Race,
                 Level = 1,
                 Abilities = finalAbilities,
+                Wallet = new Wallet(),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -89,7 +102,7 @@ namespace DnDiscordAPI.Games.Character.Services
                 .FirstOrDefaultAsync(c => c.Id == characterId);
 
             if (character == null)
-                throw new Exception($"Character {characterId} not found");
+                throw new KeyNotFoundException($"Character {characterId} not found");
 
             return _mapper.Map<CharacterDto>(character);
         }
@@ -98,7 +111,7 @@ namespace DnDiscordAPI.Games.Character.Services
         {
             var character = await _context.Characters.FindAsync(characterId);
             if (character == null)
-                throw new Exception($"Character {characterId} not found");
+                throw new KeyNotFoundException($"Character {characterId} not found");
 
             character.CurrentHitPoints = Math.Clamp(newHitPoints, 0, character.MaxHitPoints);
             character.UpdatedAt = DateTime.UtcNow;
@@ -136,7 +149,7 @@ namespace DnDiscordAPI.Games.Character.Services
         {
             var character = await _context.Characters.FindAsync(characterId);
             if (character == null)
-                throw new Exception($"Character {characterId} not found");
+                throw new KeyNotFoundException($"Character {characterId} not found");
 
             // Augmenter le niveau
             character.Level++;
@@ -179,6 +192,56 @@ namespace DnDiscordAPI.Games.Character.Services
             };
 
             return Random.Shared.Next(1, dieSize + 1);
+        }
+
+        public Task<string?> GetOwnerDiscordIdAsync(Guid characterId)
+        {
+            return _context.Characters
+                .AsNoTracking()
+                .Where(c => c.Id == characterId)
+                .Select(c => c.DiscordUserId)
+                .FirstOrDefaultAsync();
+        }
+
+        public async Task<WalletDto> GetWalletAsync(Guid characterId)
+        {
+            var character = await _context.Characters.FindAsync(characterId)
+                ?? throw new KeyNotFoundException($"Character {characterId} not found");
+
+            return _mapper.Map<WalletDto>(character.Wallet ?? new Wallet());
+        }
+
+        public async Task<WalletDto> ModifyWalletAsync(Guid characterId, ModifyWalletRequest request)
+        {
+            var character = await _context.Characters.FindAsync(characterId)
+                ?? throw new KeyNotFoundException($"Character {characterId} not found");
+
+            character.Wallet ??= new Wallet();
+
+            // Appliquer les deltas et clamper à 0
+            character.Wallet.CopperPieces = Math.Max(0, character.Wallet.CopperPieces + request.CopperPieces);
+            character.Wallet.SilverPieces = Math.Max(0, character.Wallet.SilverPieces + request.SilverPieces);
+            character.Wallet.ElectrumPieces = Math.Max(0, character.Wallet.ElectrumPieces + request.ElectrumPieces);
+            character.Wallet.GoldPieces = Math.Max(0, character.Wallet.GoldPieces + request.GoldPieces);
+            character.Wallet.PlatinumPieces = Math.Max(0, character.Wallet.PlatinumPieces + request.PlatinumPieces);
+            character.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            var dto = _mapper.Map<WalletDto>(character.Wallet);
+
+            await _signalR.SendWalletChangedAsync(character.DiscordUserId, characterId, dto);
+
+            _logger.LogInformation(
+                "Wallet modified for character {Character}: CP={CP} PA={PA} PE={PE} PO={PO} PP={PP}",
+                characterId,
+                character.Wallet.CopperPieces,
+                character.Wallet.SilverPieces,
+                character.Wallet.ElectrumPieces,
+                character.Wallet.GoldPieces,
+                character.Wallet.PlatinumPieces);
+
+            return dto;
         }
     }
 }

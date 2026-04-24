@@ -11,13 +11,11 @@ public class SessionManager
     private readonly ConcurrentDictionary<string, string> _connectionToSession = new(); // ConnectionId -> SessionId
     private readonly ConcurrentDictionary<string, string> _joinCodeToSession = new(); // JoinCode -> SessionId
     private readonly ILogger<SessionManager> _logger;
-    private readonly StateManager _stateManager;
     private readonly MessageSequencer _messageSequencer;
 
-    public SessionManager(ILogger<SessionManager> logger, StateManager stateManager, MessageSequencer messageSequencer)
+    public SessionManager(ILogger<SessionManager> logger, MessageSequencer messageSequencer)
     {
         _logger = logger;
-        _stateManager = stateManager;
         _messageSequencer = messageSequencer;
     }
 
@@ -171,7 +169,6 @@ public class SessionManager
                     _sessions.TryRemove(sessionId, out _);
                     if (!string.IsNullOrWhiteSpace(session.JoinCode))
                         _joinCodeToSession.TryRemove(session.JoinCode, out _);
-                    _stateManager.RemoveSnapshot(sessionId);
                     _messageSequencer.ResetSequence(sessionId);
                     _logger.LogInformation("Session {SessionId} removed (no players left)", sessionId);
                 }
@@ -249,7 +246,6 @@ public class SessionManager
                 _sessions.TryRemove(sessionId, out _);
                 if (!string.IsNullOrWhiteSpace(session.JoinCode))
                     _joinCodeToSession.TryRemove(session.JoinCode, out _);
-                _stateManager.RemoveSnapshot(sessionId);
                 _messageSequencer.ResetSequence(sessionId);
                 _logger.LogInformation("Session {SessionId} removed (no players left after kick)", sessionId);
             }
@@ -277,6 +273,14 @@ public class SessionManager
     public string? GetSessionByConnection(string connectionId)
     {
         _connectionToSession.TryGetValue(connectionId, out var sessionId);
+        // Touch the session's activity timestamp whenever it's resolved through
+        // the hub so the background cleanup can't evict a session mid-combat.
+        // Every hub command method calls this at entry, so this becomes the one
+        // central place that marks the session as "live".
+        if (sessionId != null && _sessions.TryGetValue(sessionId, out var session))
+        {
+            session.LastActivityAt = DateTime.UtcNow;
+        }
         return sessionId;
     }
 
@@ -290,6 +294,50 @@ public class SessionManager
         return _sessions.Values
             .Where(s => s.CampaignId == campaignId)
             .ToList();
+    }
+
+    /// <summary>
+    /// Find the active session this user is a member of (connected or disconnected).
+    /// Used by the hub's reconnect path so a refreshed client can be re-placed
+    /// into its previous session without replaying the invite/join flow.
+    /// Returns null when the user has no active session.
+    /// </summary>
+    public GameSession? FindSessionByUser(Guid userId)
+    {
+        foreach (var session in _sessions.Values)
+        {
+            lock (session.Players)
+            {
+                if (session.Players.Any(p => p.UserId == userId))
+                    return session;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Drop a session entirely from the in-memory index (used when the DM
+    /// explicitly ends the session by leaving — stale data shouldn't linger
+    /// because FindSessionByUser would otherwise auto-rejoin a ghost session
+    /// on the next connect). Mirrors CleanupStaleSessions' full teardown —
+    /// _connectionToSession and _messageSequencer must drop the session id
+    /// too, otherwise GetSessionByConnection returns a removed session id
+    /// and message sequence numbers leak between back-to-back sessions.
+    /// </summary>
+    public bool RemoveSession(string sessionId)
+    {
+        var removed = _sessions.TryRemove(sessionId, out var session);
+        if (!removed || session == null) return false;
+
+        if (!string.IsNullOrWhiteSpace(session.JoinCode))
+            _joinCodeToSession.TryRemove(session.JoinCode, out _);
+
+        _messageSequencer.ResetSequence(sessionId);
+
+        foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
+            _connectionToSession.TryRemove(p.ConnectionId!, out _);
+
+        return true;
     }
 
     /// <summary>
@@ -336,6 +384,7 @@ public class SessionManager
 
     /// <summary>
     /// Définir le personnage sélectionné par un joueur dans la session.
+    /// Choosing a real character clears any previously-picked default template.
     /// </summary>
     public bool SetPlayerCharacter(string sessionId, Guid userId, Guid? characterId)
     {
@@ -349,6 +398,29 @@ public class SessionManager
                 return false;
 
             player.SelectedCharacterId = characterId;
+            if (characterId.HasValue) player.SelectedDefaultTemplate = null;
+            session.LastActivityAt = DateTime.UtcNow;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Pick a preset template (warrior / mage / archer) as a no-persisted-character
+    /// quickstart. Mutually exclusive with a real SelectedCharacterId.
+    /// </summary>
+    public bool SetPlayerDefaultTemplate(string sessionId, Guid userId, string? templateId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            return false;
+
+        lock (session.Players)
+        {
+            var player = session.Players.FirstOrDefault(p => p.UserId == userId);
+            if (player == null)
+                return false;
+
+            player.SelectedDefaultTemplate = string.IsNullOrWhiteSpace(templateId) ? null : templateId;
+            if (!string.IsNullOrWhiteSpace(templateId)) player.SelectedCharacterId = null;
             session.LastActivityAt = DateTime.UtcNow;
             return true;
         }
@@ -413,7 +485,6 @@ public class SessionManager
             _sessions.TryRemove(session.SessionId, out _);
             if (!string.IsNullOrWhiteSpace(session.JoinCode))
                 _joinCodeToSession.TryRemove(session.JoinCode, out _);
-            _stateManager.RemoveSnapshot(session.SessionId);
             _messageSequencer.ResetSequence(session.SessionId);
             foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
                 _connectionToSession.TryRemove(p.ConnectionId!, out _);
@@ -436,8 +507,13 @@ public class SessionManager
         var now = DateTime.UtcNow;
         var toRemove = _sessions.Values
             .Where(s =>
-                (s.DmDisconnectedAt.HasValue && (now - s.DmDisconnectedAt.Value) >= dmDisconnectedThreshold) ||
-                (s.LastActivityAt < now - inactivityThreshold))
+                // Never evict a session while any player is currently connected —
+                // the LastActivityAt heuristic isn't enough when combat commands
+                // don't always touch it. An active websocket is the authoritative
+                // "still alive" signal.
+                s.Players.All(p => p.Status != Define.ConnectionStatus.Connected) &&
+                ((s.DmDisconnectedAt.HasValue && (now - s.DmDisconnectedAt.Value) >= dmDisconnectedThreshold) ||
+                 (s.LastActivityAt < now - inactivityThreshold)))
             .ToList();
 
         foreach (var session in toRemove)
@@ -445,7 +521,6 @@ public class SessionManager
             _sessions.TryRemove(session.SessionId, out _);
             if (!string.IsNullOrWhiteSpace(session.JoinCode))
                 _joinCodeToSession.TryRemove(session.JoinCode, out _);
-            _stateManager.RemoveSnapshot(session.SessionId);
             _messageSequencer.ResetSequence(session.SessionId);
             foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
                 _connectionToSession.TryRemove(p.ConnectionId!, out _);

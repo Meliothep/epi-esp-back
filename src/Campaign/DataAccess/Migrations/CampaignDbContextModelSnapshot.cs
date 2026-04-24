@@ -28,6 +28,9 @@ namespace DnDiscord.Campaign.DataAccess.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("CampaignTreeDefinition")
+                        .HasColumnType("json");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -71,9 +74,6 @@ namespace DnDiscord.Campaign.DataAccess.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<string>("CampaignTreeDefinition")
-                        .HasColumnType("json");
-
                     b.Property<string>("SettingsJson")
                         .HasColumnType("jsonb");
 
@@ -101,6 +101,79 @@ namespace DnDiscord.Campaign.DataAccess.Migrations
                     b.HasIndex("Status");
 
                     b.ToTable("Campaigns", (string)null);
+                });
+
+            modelBuilder.Entity("DnDiscord.Campaign.DataAccess.Models.CampaignGameSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CurrentNodeId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("StartedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId");
+
+                    b.HasIndex("StartedAt");
+
+                    b.HasIndex("StartedBy");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("CampaignGameSessions", (string)null);
+                });
+
+            modelBuilder.Entity("DnDiscord.Campaign.DataAccess.Models.CampaignMap", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Data")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId");
+
+                    b.HasIndex("CampaignId", "CreatedAt");
+
+                    b.ToTable("CampaignMaps", (string)null);
                 });
 
             modelBuilder.Entity("DnDiscord.Campaign.DataAccess.Models.CampaignMember", b =>
@@ -211,56 +284,22 @@ namespace DnDiscord.Campaign.DataAccess.Migrations
                     b.ToTable("CampaignSnapshots", (string)null);
                 });
 
-            modelBuilder.Entity("DnDiscord.Campaign.DataAccess.Models.CampaignGameSession", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("CampaignId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("CurrentNodeId")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<Guid>("StartedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("StartedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("EndedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CampaignId");
-
-                    b.HasIndex("StartedBy");
-
-                    b.HasIndex("Status");
-
-                    b.HasIndex("StartedAt");
-
-                    b.ToTable("CampaignGameSessions", (string)null);
-                });
-
             modelBuilder.Entity("DnDiscord.Campaign.DataAccess.Models.SessionHistoryEntry", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("SessionId")
-                        .HasColumnType("uuid");
+                    b.Property<string>("ChoiceText")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<string>("NodeId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("NodeTitle")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
@@ -270,18 +309,12 @@ namespace DnDiscord.Campaign.DataAccess.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
-                    b.Property<string>("NodeTitle")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
                     b.Property<string>("PortUsed")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
-                    b.Property<string>("ChoiceText")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("VisitedAt")
                         .HasColumnType("timestamp with time zone");
@@ -293,6 +326,26 @@ namespace DnDiscord.Campaign.DataAccess.Migrations
                     b.HasIndex("VisitedAt");
 
                     b.ToTable("SessionHistoryEntries", (string)null);
+                });
+
+            modelBuilder.Entity("DnDiscord.Campaign.DataAccess.Models.CampaignGameSession", b =>
+                {
+                    b.HasOne("DnDiscord.Campaign.DataAccess.Models.Campaign", "Campaign")
+                        .WithMany("GameSessions")
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Campaign");
+                });
+
+            modelBuilder.Entity("DnDiscord.Campaign.DataAccess.Models.CampaignMap", b =>
+                {
+                    b.HasOne("DnDiscord.Campaign.DataAccess.Models.Campaign", null)
+                        .WithMany()
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("DnDiscord.Campaign.DataAccess.Models.CampaignMember", b =>
@@ -317,17 +370,6 @@ namespace DnDiscord.Campaign.DataAccess.Migrations
                     b.Navigation("Campaign");
                 });
 
-            modelBuilder.Entity("DnDiscord.Campaign.DataAccess.Models.CampaignGameSession", b =>
-                {
-                    b.HasOne("DnDiscord.Campaign.DataAccess.Models.Campaign", "Campaign")
-                        .WithMany("GameSessions")
-                        .HasForeignKey("CampaignId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Campaign");
-                });
-
             modelBuilder.Entity("DnDiscord.Campaign.DataAccess.Models.SessionHistoryEntry", b =>
                 {
                     b.HasOne("DnDiscord.Campaign.DataAccess.Models.CampaignGameSession", "Session")
@@ -341,11 +383,11 @@ namespace DnDiscord.Campaign.DataAccess.Migrations
 
             modelBuilder.Entity("DnDiscord.Campaign.DataAccess.Models.Campaign", b =>
                 {
+                    b.Navigation("GameSessions");
+
                     b.Navigation("Members");
 
                     b.Navigation("Snapshots");
-
-                    b.Navigation("GameSessions");
                 });
 
             modelBuilder.Entity("DnDiscord.Campaign.DataAccess.Models.CampaignGameSession", b =>

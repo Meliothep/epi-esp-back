@@ -27,6 +27,12 @@ public class UserContextService : IUserContextService
     /// </summary>
     public Guid GetCurrentUserId()
     {
+        return DiscordIdMapping.ToGuid(GetCurrentDiscordUserId());
+    }
+
+    /// <inheritdoc />
+    public string GetCurrentDiscordUserId()
+    {
         var user = _httpContextAccessor.HttpContext?.User;
 
         if (user == null)
@@ -44,16 +50,20 @@ public class UserContextService : IUserContextService
             throw new UnauthorizedAccessException("User ID not found in token");
         }
 
-        // Convert Discord ID string to deterministic Guid via shared helper.
-        return DiscordIdMapping.ToGuid(discordId);
+        return discordId;
     }
 
-    /// <summary>
-    /// Alias rétro-compatible vers <see cref="DiscordIdMapping.ToGuid"/>.
-    /// Gardé pour ne pas casser les appels existants ; préférer
-    /// <c>DiscordIdMapping.ToGuid</c> dans les nouveaux callers.
-    /// </summary>
-    [Obsolete("Utiliser DnDiscord.Campaign.Common.DiscordIdMapping.ToGuid à la place.")]
-    public static Guid ConvertDiscordIdToGuid(string discordId)
-        => DiscordIdMapping.ToGuid(discordId);
+    /// <inheritdoc />
+    public string GetCurrentUserName()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user == null) return string.Empty;
+
+        return user.FindFirst("preferred_username")?.Value
+            ?? user.FindFirst(ClaimTypes.Name)?.Value
+            ?? user.FindFirst("name")?.Value
+            ?? user.FindFirst("unique_name")?.Value
+            ?? user.FindFirst("username")?.Value
+            ?? string.Empty;
+    }
 }
