@@ -202,6 +202,77 @@ public class GameHub : Hub
 
         _logger.LogInformation("Rejoined user {UserId} to session {SessionId} (phase {Phase})",
             userId, session.SessionId, session.Combat.Phase);
+
+        // Replay pending roll requests so rejoining clients resume mid-flight state.
+        var isDmUser = session.DmUserId == userId;
+        foreach (var pending in session.PendingRolls.Values)
+        {
+            var isTarget = pending.RollValues.ContainsKey(userId);
+            var stillPending = pending.PendingUserIds.Contains(userId);
+
+            if (isDmUser)
+            {
+                await Clients.Caller.SendAsync(
+                    "RollRequestedDmEcho",
+                    new RollRequestedDmEchoPayload(
+                        pending.RequestId,
+                        pending.DiceType,
+                        pending.Label,
+                        pending.RollValues.Keys.ToList(),
+                        pending.RollValues.Count));
+
+                foreach (var (submittedUserId, submittedValue) in pending.SubmittedValues)
+                {
+                    var p = session.Players.FirstOrDefault(pp => pp.UserId == submittedUserId);
+                    await Clients.Caller.SendAsync(
+                        "RollResultBroadcast",
+                        new RollResultBroadcastPayload(
+                            pending.RequestId,
+                            submittedUserId,
+                            p?.UserName,
+                            pending.DiceType,
+                            submittedValue,
+                            pending.Label,
+                            false)); // RequestComplete=false during replay — real completion already occurred
+                }
+            }
+            else if (isTarget && stillPending)
+            {
+                await Clients.Caller.SendAsync(
+                    "RollRequested",
+                    new RollRequestedPayload(
+                        pending.RequestId,
+                        pending.DiceType,
+                        pending.Label,
+                        pending.RollValues[userId]));
+            }
+            else
+            {
+                await Clients.Caller.SendAsync(
+                    "RollRequestedPublic",
+                    new RollRequestedPublicPayload(
+                        pending.RequestId,
+                        pending.DiceType,
+                        pending.Label,
+                        pending.RollValues.Keys.ToList(),
+                        pending.RollValues.Count));
+
+                foreach (var (submittedUserId, submittedValue) in pending.SubmittedValues)
+                {
+                    var p = session.Players.FirstOrDefault(pp => pp.UserId == submittedUserId);
+                    await Clients.Caller.SendAsync(
+                        "RollResultBroadcast",
+                        new RollResultBroadcastPayload(
+                            pending.RequestId,
+                            submittedUserId,
+                            p?.UserName,
+                            pending.DiceType,
+                            submittedValue,
+                            pending.Label,
+                            false));
+                }
+            }
+        }
     }
 
     /// <summary>
