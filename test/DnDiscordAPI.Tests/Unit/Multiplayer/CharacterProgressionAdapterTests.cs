@@ -3,6 +3,8 @@ using DnDiscordAPI.Games.Character.Models;
 using DnDiscordAPI.Games.Character.Services;
 using DnDiscordAPI.Games.Database;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.InMemory;
 using Xunit;
 
 namespace DnDiscordAPI.Tests.Unit.Multiplayer;
@@ -20,6 +22,7 @@ public class CharacterProgressionAdapterTests
     {
         var options = new DbContextOptionsBuilder<GamesDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()) // isolated per test
+            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
         return new GamesDbContext(options);
     }
@@ -145,6 +148,23 @@ public class CharacterProgressionAdapterTests
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             () => adapter.AwardExperienceAsync(character.Id, -50));
+    }
+
+    [Fact]
+    public async Task AwardExperience_ExceedsBatchLimit_Throws()
+    {
+        // 30 000 XP at level 1 → 30 level-ups required, exceeds MaxBatchLevelUps (25).
+        // Remainder (5 000) must NOT be persisted — the invariant ExperiencePoints < 1 000 would break
+        // and the front-end bar would render at 500 %.
+        var (adapter, _, db) = MakeAdapter(level: 1, xp: 0);
+        var character = db.Characters.First();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => adapter.AwardExperienceAsync(character.Id, 30_000));
+
+        // Character XP must be unchanged — no partial commit.
+        var reloaded = await db.Characters.FindAsync(character.Id);
+        Assert.Equal(0, reloaded!.ExperiencePoints);
     }
 
     // ── ForceLevelUp ─────────────────────────────────────────────────────────

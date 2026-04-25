@@ -1251,11 +1251,13 @@ public class GameHub : Hub
         if (session.DmUserId != GetUserId())
             throw new HubException("Only the DM can grant gold");
 
-        var amount = payload.Amount != 0 ? payload.Amount : payload.GoldPieces;
+        var amount = payload.Amount;
         if (amount == 0)
             throw new HubException("Amount must not be 0");
 
         var currencyType = (payload.CurrencyType ?? "gp").Trim().ToLowerInvariant();
+        if (!new[] { "cp", "sp", "ep", "gp", "pp" }.Contains(currencyType))
+            throw new HubException($"Invalid currency type '{payload.CurrencyType}'. Must be one of: cp, sp, ep, gp, pp");
 
         var targetPlayer = session.Players.FirstOrDefault(p => p.UserId == payload.TargetUserId)
             ?? throw new HubException("Target player not found in session");
@@ -1358,17 +1360,34 @@ public class GameHub : Hub
         int currentHp,
         int maxHp)
     {
-        UnitRuntimeState? unit;
+        string unitId;
+        int snapshotHp;
+        int snapshotMaxHp;
+        bool isAlive;
+        bool wasAlive;
+        int oldHp;
+
         await session.Combat.Lock.WaitAsync();
         try
         {
-            unit = session.Combat.Units.Values
+            var unit = session.Combat.Units.Values
                 .FirstOrDefault(u => u.OwnerUserId == targetUserId);
 
             if (unit == null) return;
 
+            // Capture state before mutation so WasAlive and Delta are correct.
+            wasAlive = unit.IsAlive;
+            oldHp = unit.CurrentHp;
+
             unit.MaxHp = maxHp;
             unit.CurrentHp = Math.Clamp(currentHp, 0, maxHp);
+
+            // Snapshot inside the lock to prevent concurrent mutations from
+            // producing a stale payload after Lock.Release().
+            unitId = unit.UnitId;
+            snapshotHp = unit.CurrentHp;
+            snapshotMaxHp = unit.MaxHp;
+            isAlive = unit.IsAlive;
         }
         finally
         {
@@ -1377,12 +1396,12 @@ public class GameHub : Hub
 
         var hpPayload = new UnitHpAdjustedPayload
         {
-            UnitId = unit.UnitId,
-            Hp = unit.CurrentHp,
-            MaxHp = unit.MaxHp,
-            IsAlive = unit.IsAlive,
-            Delta = 0,
-            WasAlive = unit.IsAlive,
+            UnitId = unitId,
+            Hp = snapshotHp,
+            MaxHp = snapshotMaxHp,
+            IsAlive = isAlive,
+            Delta = snapshotHp - oldHp,
+            WasAlive = wasAlive,
         };
         var hpMessage = _messageSequencer.CreateMessage(session.SessionId, "UnitHpAdjusted", hpPayload);
         await Clients.Group(session.SessionId).SendAsync("UnitHpAdjusted", hpMessage);

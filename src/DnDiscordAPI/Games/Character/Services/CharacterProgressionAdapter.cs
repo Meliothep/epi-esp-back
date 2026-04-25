@@ -34,8 +34,15 @@ public class CharacterProgressionAdapter : ICharacterProgressionService
 
         var previousLevel = character.Level;
         var total = character.ExperiencePoints + experienceAmount;
-        var levelUps = Math.Min(total / ExperiencePerLevel, MaxBatchLevelUps);
+        if (total / ExperiencePerLevel > MaxBatchLevelUps)
+            throw new ArgumentOutOfRangeException(nameof(experienceAmount),
+                $"Awarding {experienceAmount} XP would require more than {MaxBatchLevelUps} level-ups in a single batch. Split the award or use ForceLevelUpAsync.");
+
+        var levelUps = total / ExperiencePerLevel;
         var remainder = Math.Max(0, total - (levelUps * ExperiencePerLevel));
+
+        await using var tx = await _context.Database.BeginTransactionAsync();
+
         character.ExperiencePoints = remainder;
         character.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
@@ -45,6 +52,8 @@ public class CharacterProgressionAdapter : ICharacterProgressionService
         {
             after = await _characterService.LevelUpAsync(characterId);
         }
+
+        await tx.CommitAsync();
 
         return ToProgressionResult(
             awardedExperience: experienceAmount,

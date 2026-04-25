@@ -159,7 +159,7 @@ namespace DnDiscordAPI.Games.Character.Services
 
             // Lightweight stat progression: every 4 levels, grant an ability-score
             // increase according to class fantasy, capped to 20.
-            ApplyAbilityScoreIncrease(character);
+            ApplyAbilityScoreIncrease(character, _logger);
 
             // Obtenir les traits de classe pour le calcul des HP
             var classTraits = character.GetClassTraits();
@@ -208,7 +208,7 @@ namespace DnDiscordAPI.Games.Character.Services
 
         private static int ClampAbility(int value) => Math.Clamp(value, 1, 20);
 
-        private static void ApplyAbilityScoreIncrease(Models.Character character)
+        private static void ApplyAbilityScoreIncrease(Models.Character character, ILogger<CharacterService> logger)
         {
             // D&D-like ASI cadence.
             if (character.Level % 4 != 0) return;
@@ -247,6 +247,7 @@ namespace DnDiscordAPI.Games.Character.Services
                     break;
 
                 default:
+                    logger.LogWarning("No ASI configured for character class {Class}. If a new class was added to the enum, update ApplyAbilityScoreIncrease.", character.Class);
                     break;
             }
         }

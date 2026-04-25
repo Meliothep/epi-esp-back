@@ -113,7 +113,6 @@ public class DmGrantGoldPayload
     public Guid TargetUserId { get; set; }
     public int Amount { get; set; }
     public string CurrencyType { get; set; } = "gp";
-    public int GoldPieces { get; set; }
 }
 
 /// <summary>
