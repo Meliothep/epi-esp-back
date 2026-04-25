@@ -30,8 +30,18 @@ namespace DnDiscordAPI.Games.Controllers
             if (string.IsNullOrEmpty(discordUserId))
                 return Unauthorized(new { error = "User id missing in token" });
 
-            var character = await _characterService.CreateCharacterAsync(discordUserId, request);
-            return CreatedAtAction(nameof(GetCharacter), new { id = character.Id }, character);
+            try
+            {
+                var character = await _characterService.CreateCharacterAsync(discordUserId, request);
+                return CreatedAtAction(nameof(GetCharacter), new { id = character.Id }, character);
+            }
+            // Filter on ParamName so we only convert the IsPlayable validation
+            // error to 400 — any other internal ArgumentException (e.g. a missing
+            // ClassTraits entry for a future enum value) propagates as 500.
+            catch (ArgumentException ex) when (ex.ParamName == nameof(request))
+            {
+                return BadRequest(new { error = ex.Message });
+            }
         }
 
         [HttpGet("{id}")]
