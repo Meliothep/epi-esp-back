@@ -1143,7 +1143,7 @@ public class GameHub : Hub
         CharacterProgressionResult result;
         try
         {
-            result = await _characterProgression.AwardExperienceAsync(characterId, payload.ExperienceAmount);
+            result = await _characterProgression.AwardExperienceAsync(characterId, payload.TargetUserId, payload.ExperienceAmount);
         }
         catch (ArgumentOutOfRangeException ex) when (ex.ParamName == "experienceAmount")
         {
@@ -1152,6 +1152,10 @@ public class GameHub : Hub
         catch (ArgumentOutOfRangeException)
         {
             throw new HubException("Invalid XP award parameters.");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new HubException("Character ownership mismatch: " + ex.Message);
         }
 
         await SyncCharacterHpToActiveUnitAsync(session, payload.TargetUserId, result.CurrentHitPoints, result.MaxHitPoints);
@@ -1215,7 +1219,7 @@ public class GameHub : Hub
         CharacterProgressionResult result;
         try
         {
-            result = await _characterProgression.ForceLevelUpAsync(characterId, payload.Levels);
+            result = await _characterProgression.ForceLevelUpAsync(characterId, payload.TargetUserId, payload.Levels);
         }
         catch (ArgumentOutOfRangeException ex) when (ex.ParamName == "levels")
         {
@@ -1224,6 +1228,10 @@ public class GameHub : Hub
         catch (ArgumentOutOfRangeException)
         {
             throw new HubException("Invalid level-up parameters.");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new HubException("Character ownership mismatch: " + ex.Message);
         }
 
         await SyncCharacterHpToActiveUnitAsync(session, payload.TargetUserId, result.CurrentHitPoints, result.MaxHitPoints);
@@ -1289,7 +1297,15 @@ public class GameHub : Hub
         if (targetPlayer.SelectedCharacterId is not Guid characterId)
             throw new HubException("Target player has not selected a character");
 
-        var wallet = await _characterProgression.AdjustCurrencyAsync(characterId, currencyType, amount);
+        WalletSnapshotResult wallet;
+        try
+        {
+            wallet = await _characterProgression.AdjustCurrencyAsync(characterId, payload.TargetUserId, currencyType, amount);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new HubException("Character ownership mismatch: " + ex.Message);
+        }
 
         var goldGranted = new GoldGrantedPayload
         {

@@ -1,3 +1,4 @@
+using DnDiscord.Campaign.Common;
 using DnDiscordAPI.Games.Character.DTOs;
 using DnDiscordAPI.Games.Database;
 using Microsoft.EntityFrameworkCore;
@@ -24,34 +25,40 @@ public class CharacterProgressionAdapter : ICharacterProgressionService
         _context = context;
     }
 
-    public async Task<CharacterProgressionResult> AwardExperienceAsync(Guid characterId, int experienceAmount)
+    public async Task<CharacterProgressionResult> AwardExperienceAsync(Guid characterId, Guid expectedOwnerUserId, int experienceAmount)
     {
         if (experienceAmount <= 0)
             throw new ArgumentOutOfRangeException(nameof(experienceAmount), "Experience amount must be > 0");
 
-        var character = await _context.Characters.FirstOrDefaultAsync(c => c.Id == characterId)
+        var character = await _context.Characters.FindAsync(characterId)
             ?? throw new KeyNotFoundException($"Character {characterId} not found");
+
+        EnsureOwnership(character, expectedOwnerUserId, characterId);
 
         var previousLevel = character.Level;
         var total = character.ExperiencePoints + experienceAmount;
-        if (total / ExperiencePerLevel > MaxBatchLevelUps)
-            throw new ArgumentOutOfRangeException(nameof(experienceAmount),
-                $"Awarding {experienceAmount} XP would require more than {MaxBatchLevelUps} level-ups in a single batch. Split the award or use ForceLevelUpAsync.");
-
         var levelUps = total / ExperiencePerLevel;
         var remainder = Math.Max(0, total - (levelUps * ExperiencePerLevel));
 
+        if (levelUps > MaxBatchLevelUps)
+            throw new ArgumentOutOfRangeException(nameof(experienceAmount),
+                $"Awarding {experienceAmount} XP would require more than {MaxBatchLevelUps} level-ups in a single batch. Split the award or use ForceLevelUpAsync.");
+
         await using var tx = await _context.Database.BeginTransactionAsync();
+
+        // Level-up loop FIRST so ExperiencePoints isn't committed without the level changes
+        // (previous ordering wrote the remainder first → silent data loss if a level-up
+        // crashed mid-loop, see PR #32 review). Pass shared `_context` so the inner work
+        // enrolls in this transaction instead of allocating a fresh DbContext on the side.
+        CharacterDto after = await _characterService.GetCharacterAsync(characterId);
+        for (var i = 0; i < levelUps; i++)
+        {
+            after = await _characterService.LevelUpAsync(_context, characterId);
+        }
 
         character.ExperiencePoints = remainder;
         character.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
-
-        CharacterDto after = await _characterService.GetCharacterAsync(characterId);
-        for (var i = 0; i < levelUps; i++)
-        {
-            after = await _characterService.LevelUpAsync(characterId);
-        }
 
         await tx.CommitAsync();
 
@@ -62,7 +69,7 @@ public class CharacterProgressionAdapter : ICharacterProgressionService
             dto: after);
     }
 
-    public async Task<CharacterProgressionResult> ForceLevelUpAsync(Guid characterId, int levels)
+    public async Task<CharacterProgressionResult> ForceLevelUpAsync(Guid characterId, Guid expectedOwnerUserId, int levels)
     {
         if (levels <= 0)
             throw new ArgumentOutOfRangeException(nameof(levels), "Levels must be > 0");
@@ -71,25 +78,40 @@ public class CharacterProgressionAdapter : ICharacterProgressionService
             throw new ArgumentOutOfRangeException(nameof(levels),
                 $"Forcing {levels} level-ups exceeds the batch limit of {MaxBatchLevelUps}. Split the operation.");
 
-        var before = await _characterService.GetCharacterAsync(characterId);
-        CharacterDto after = before;
+        var character = await _context.Characters.FindAsync(characterId)
+            ?? throw new KeyNotFoundException($"Character {characterId} not found");
+
+        EnsureOwnership(character, expectedOwnerUserId, characterId);
+
+        var previousLevel = character.Level;
+
+        await using var tx = await _context.Database.BeginTransactionAsync();
+
+        CharacterDto after = await _characterService.GetCharacterAsync(characterId);
         for (var i = 0; i < levels; i++)
         {
-            after = await _characterService.LevelUpAsync(characterId);
+            after = await _characterService.LevelUpAsync(_context, characterId);
         }
+
+        await tx.CommitAsync();
 
         var remainder = after.ExperiencePoints;
         return ToProgressionResult(
             awardedExperience: 0,
             remainder: remainder,
-            previousLevel: before.Level,
+            previousLevel: previousLevel,
             dto: after);
     }
 
-    public async Task<WalletSnapshotResult> AdjustCurrencyAsync(Guid characterId, string currencyType, int amount)
+    public async Task<WalletSnapshotResult> AdjustCurrencyAsync(Guid characterId, Guid expectedOwnerUserId, string currencyType, int amount)
     {
         if (amount == 0)
             throw new ArgumentOutOfRangeException(nameof(amount), "Currency amount must not be 0");
+
+        var character = await _context.Characters.FindAsync(characterId)
+            ?? throw new KeyNotFoundException($"Character {characterId} not found");
+
+        EnsureOwnership(character, expectedOwnerUserId, characterId);
 
         var request = new ModifyWalletRequest();
         switch (currencyType ?? "gp")
@@ -124,6 +146,19 @@ public class CharacterProgressionAdapter : ICharacterProgressionService
             PlatinumPieces = wallet.PlatinumPieces,
             TotalInCopper = wallet.TotalInCopper,
         };
+    }
+
+    /// <summary>
+    /// Verifies the character's persisted Discord owner (string snowflake) matches
+    /// the caller-supplied deterministic Guid. Hub computes <paramref name="expectedOwnerUserId"/>
+    /// from in-memory SessionManager state, so this guards against stale / wrong mappings.
+    /// </summary>
+    private static void EnsureOwnership(Models.Character character, Guid expectedOwnerUserId, Guid characterId)
+    {
+        var actualOwnerGuid = DiscordIdMapping.ToGuid(character.DiscordUserId);
+        if (actualOwnerGuid != expectedOwnerUserId)
+            throw new UnauthorizedAccessException(
+                $"Character {characterId} does not belong to user {expectedOwnerUserId}");
     }
 
     private static CharacterProgressionResult ToProgressionResult(

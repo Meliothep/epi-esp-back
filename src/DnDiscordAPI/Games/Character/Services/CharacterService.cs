@@ -14,6 +14,12 @@ namespace DnDiscordAPI.Games.Character.Services
         Task<List<CharacterDto>> GetUserCharactersAsync(string discordUserId);
         Task<CharacterDto> UpdateHitPointsAsync(Guid characterId, int newHitPoints);
         Task<CharacterDto> LevelUpAsync(Guid characterId);
+        /// <summary>
+        /// Overload that runs LevelUp against a caller-supplied <see cref="GamesDbContext"/>
+        /// so the caller can enroll the work in its own transaction (shared connection /
+        /// shared change tracker). Does NOT begin or commit a transaction itself.
+        /// </summary>
+        Task<CharacterDto> LevelUpAsync(GamesDbContext ctx, Guid characterId);
         Task<WalletDto> GetWalletAsync(Guid characterId);
         Task<WalletDto> ModifyWalletAsync(Guid characterId, ModifyWalletRequest request);
 
@@ -146,9 +152,12 @@ namespace DnDiscordAPI.Games.Character.Services
             };
         }
 
-        public async Task<CharacterDto> LevelUpAsync(Guid characterId)
+        public Task<CharacterDto> LevelUpAsync(Guid characterId)
+            => LevelUpAsync(_context, characterId);
+
+        public async Task<CharacterDto> LevelUpAsync(GamesDbContext ctx, Guid characterId)
         {
-            var character = await _context.Characters.FindAsync(characterId);
+            var character = await ctx.Characters.FindAsync(characterId);
             if (character == null)
                 throw new KeyNotFoundException($"Character {characterId} not found");
 
@@ -164,11 +173,11 @@ namespace DnDiscordAPI.Games.Character.Services
             // Obtenir les traits de classe pour le calcul des HP
             var classTraits = character.GetClassTraits();
             var constitutionModifier = character.Abilities.GetModifier(character.Abilities.Constitution);
-            
+
             // Recalculer les HP maximaux pour le nouveau niveau
             var newMaxHp = classTraits.CalculateMaxHitPoints(character.Level, constitutionModifier);
             var hpIncrease = newMaxHp - character.MaxHitPoints;
-            
+
             character.MaxHitPoints = newMaxHp;
             character.CurrentHitPoints = Math.Clamp(character.CurrentHitPoints + hpIncrease, 0, character.MaxHitPoints);
 
@@ -178,7 +187,7 @@ namespace DnDiscordAPI.Games.Character.Services
 
             character.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            await ctx.SaveChangesAsync();
 
             _logger.LogInformation(
                 "Character {Name} (ID: {Id}) leveled up to level {Level}. HP: {Current}/{Max}",

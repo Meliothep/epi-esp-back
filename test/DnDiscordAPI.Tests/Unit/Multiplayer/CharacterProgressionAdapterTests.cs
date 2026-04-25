@@ -1,3 +1,4 @@
+using DnDiscord.Campaign.Common;
 using DnDiscordAPI.Games.Character.DTOs;
 using DnDiscordAPI.Games.Character.Models;
 using DnDiscordAPI.Games.Character.Services;
@@ -67,6 +68,14 @@ public class CharacterProgressionAdapterTests
         return (adapter, stub, db);
     }
 
+    /// <summary>
+    /// Mirrors the deterministic Discord-id → Guid conversion the hub uses,
+    /// so tests can supply a matching <c>expectedOwnerUserId</c> for the
+    /// adapter's defense-in-depth ownership check.
+    /// </summary>
+    private static Guid OwnerGuid(Character character)
+        => DiscordIdMapping.ToGuid(character.DiscordUserId);
+
     // ── AwardExperience ──────────────────────────────────────────────────────
 
     [Fact]
@@ -75,7 +84,7 @@ public class CharacterProgressionAdapterTests
         var (adapter, stub, db) = MakeAdapter(level: 1, xp: 0);
         var character = db.Characters.First();
 
-        var result = await adapter.AwardExperienceAsync(character.Id, 500);
+        var result = await adapter.AwardExperienceAsync(character.Id, OwnerGuid(character), 500);
 
         Assert.Equal(0, result.LevelUps);
         Assert.Equal(1, result.PreviousLevel);
@@ -91,7 +100,7 @@ public class CharacterProgressionAdapterTests
         var (adapter, stub, db) = MakeAdapter(level: 1, xp: 0);
         var character = db.Characters.First();
 
-        var result = await adapter.AwardExperienceAsync(character.Id, 1000);
+        var result = await adapter.AwardExperienceAsync(character.Id, OwnerGuid(character), 1000);
 
         Assert.Equal(1, result.LevelUps);
         Assert.Equal(1, stub.LevelUpCallCount);
@@ -104,7 +113,7 @@ public class CharacterProgressionAdapterTests
         var (adapter, stub, db) = MakeAdapter(level: 1, xp: 0);
         var character = db.Characters.First();
 
-        var result = await adapter.AwardExperienceAsync(character.Id, 1700);
+        var result = await adapter.AwardExperienceAsync(character.Id, OwnerGuid(character), 1700);
 
         Assert.Equal(1, result.LevelUps);
         Assert.Equal(700, result.ExperienceRemainder); // 1700 - 1*1000 = 700
@@ -117,7 +126,7 @@ public class CharacterProgressionAdapterTests
         var (adapter, stub, db) = MakeAdapter(level: 1, xp: 600);
         var character = db.Characters.First();
 
-        var result = await adapter.AwardExperienceAsync(character.Id, 600);
+        var result = await adapter.AwardExperienceAsync(character.Id, OwnerGuid(character), 600);
 
         Assert.Equal(1, result.LevelUps);
         Assert.Equal(200, result.ExperienceRemainder);
@@ -130,11 +139,25 @@ public class CharacterProgressionAdapterTests
         var (adapter, stub, db) = MakeAdapter(level: 1, xp: 0);
         var character = db.Characters.First();
 
-        var result = await adapter.AwardExperienceAsync(character.Id, 3500);
+        var result = await adapter.AwardExperienceAsync(character.Id, OwnerGuid(character), 3500);
 
         Assert.Equal(3, result.LevelUps);
         Assert.Equal(3, stub.LevelUpCallCount);
         Assert.Equal(500, result.ExperienceRemainder);
+    }
+
+    [Fact]
+    public async Task AwardExperience_ThrowsUnauthorized_WhenOwnerMismatch()
+    {
+        var (adapter, _, db) = MakeAdapter(level: 1, xp: 0);
+        var character = db.Characters.First();
+        var wrongOwner = Guid.NewGuid(); // guaranteed != OwnerGuid(character)
+
+        var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => adapter.AwardExperienceAsync(character.Id, wrongOwner, 500));
+
+        Assert.Contains(character.Id.ToString(), ex.Message);
+        Assert.Contains(wrongOwner.ToString(), ex.Message);
     }
 
     [Fact]
@@ -144,10 +167,10 @@ public class CharacterProgressionAdapterTests
         var character = db.Characters.First();
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => adapter.AwardExperienceAsync(character.Id, 0));
+            () => adapter.AwardExperienceAsync(character.Id, OwnerGuid(character), 0));
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => adapter.AwardExperienceAsync(character.Id, -50));
+            () => adapter.AwardExperienceAsync(character.Id, OwnerGuid(character), -50));
     }
 
     [Fact]
@@ -160,7 +183,7 @@ public class CharacterProgressionAdapterTests
         var character = db.Characters.First();
 
         var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => adapter.AwardExperienceAsync(character.Id, 30_000));
+            () => adapter.AwardExperienceAsync(character.Id, OwnerGuid(character), 30_000));
 
         // ParamName must stay "experienceAmount" — GameHub.DmAwardExperience filters on this
         // exact string in its `catch (ArgumentOutOfRangeException ex) when (...)` clause.
@@ -179,7 +202,7 @@ public class CharacterProgressionAdapterTests
         var (adapter, stub, db) = MakeAdapter(level: 2);
         var character = db.Characters.First();
 
-        var result = await adapter.ForceLevelUpAsync(character.Id, 3);
+        var result = await adapter.ForceLevelUpAsync(character.Id, OwnerGuid(character), 3);
 
         Assert.Equal(3, stub.LevelUpCallCount);
         Assert.Equal(2, result.PreviousLevel); // stub always returns starting level + calls
@@ -192,10 +215,10 @@ public class CharacterProgressionAdapterTests
         var character = db.Characters.First();
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => adapter.ForceLevelUpAsync(character.Id, 0));
+            () => adapter.ForceLevelUpAsync(character.Id, OwnerGuid(character), 0));
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => adapter.ForceLevelUpAsync(character.Id, -1));
+            () => adapter.ForceLevelUpAsync(character.Id, OwnerGuid(character), -1));
     }
 
     [Fact]
@@ -206,10 +229,23 @@ public class CharacterProgressionAdapterTests
         var character = db.Characters.First();
 
         var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => adapter.ForceLevelUpAsync(character.Id, 26));
+            () => adapter.ForceLevelUpAsync(character.Id, OwnerGuid(character), 26));
 
         // ParamName must stay "levels" — GameHub.DmForceLevelUp filters on this exact string.
         Assert.Equal("levels", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task ForceLevelUp_ThrowsUnauthorized_WhenOwnerMismatch()
+    {
+        var (adapter, _, db) = MakeAdapter(level: 2);
+        var character = db.Characters.First();
+        var wrongOwner = Guid.NewGuid();
+
+        var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => adapter.ForceLevelUpAsync(character.Id, wrongOwner, 1));
+
+        Assert.Contains(character.Id.ToString(), ex.Message);
     }
 
     // ── AdjustCurrency – currency type mapping ───────────────────────────────
@@ -227,7 +263,7 @@ public class CharacterProgressionAdapterTests
         var (adapter, stub, db) = MakeAdapter();
         var character = db.Characters.First();
 
-        await adapter.AdjustCurrencyAsync(character.Id, currencyType, amount);
+        await adapter.AdjustCurrencyAsync(character.Id, OwnerGuid(character), currencyType, amount);
 
         var req = stub.LastModifyWalletRequest!;
         Assert.Equal(expectedCp, req.CopperPieces);
@@ -238,13 +274,26 @@ public class CharacterProgressionAdapterTests
     }
 
     [Fact]
+    public async Task AdjustCurrency_ThrowsUnauthorized_WhenOwnerMismatch()
+    {
+        var (adapter, _, db) = MakeAdapter();
+        var character = db.Characters.First();
+        var wrongOwner = Guid.NewGuid();
+
+        var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => adapter.AdjustCurrencyAsync(character.Id, wrongOwner, "gp", 10));
+
+        Assert.Contains(character.Id.ToString(), ex.Message);
+    }
+
+    [Fact]
     public async Task AdjustCurrency_UnknownType_Throws()
     {
         var (adapter, _, db) = MakeAdapter();
         var character = db.Characters.First();
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => adapter.AdjustCurrencyAsync(character.Id, "xp", 10));
+            () => adapter.AdjustCurrencyAsync(character.Id, OwnerGuid(character), "xp", 10));
     }
 
     [Fact]
@@ -254,7 +303,7 @@ public class CharacterProgressionAdapterTests
         var character = db.Characters.First();
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => adapter.AdjustCurrencyAsync(character.Id, "gp", 0));
+            () => adapter.AdjustCurrencyAsync(character.Id, OwnerGuid(character), "gp", 0));
     }
 
     [Fact]
@@ -264,7 +313,7 @@ public class CharacterProgressionAdapterTests
         var character = db.Characters.First();
 
         // Stub returns fixed wallet values (see StubCharacterService)
-        var result = await adapter.AdjustCurrencyAsync(character.Id, "gp", 10);
+        var result = await adapter.AdjustCurrencyAsync(character.Id, OwnerGuid(character), "gp", 10);
 
         Assert.Equal(stub.WalletResponse.CopperPieces, result.CopperPieces);
         Assert.Equal(stub.WalletResponse.SilverPieces, result.SilverPieces);
@@ -301,6 +350,9 @@ internal sealed class StubCharacterService : ICharacterService
         _levelUpCalls++;
         return Task.FromResult(ToDto(_seed.Level + _levelUpCalls));
     }
+
+    public Task<CharacterDto> LevelUpAsync(GamesDbContext ctx, Guid characterId)
+        => LevelUpAsync(characterId);
 
     public Task<WalletDto> ModifyWalletAsync(Guid characterId, ModifyWalletRequest request)
     {

@@ -6,9 +6,25 @@ namespace Multiplayer.Services;
 /// </summary>
 public interface ICharacterProgressionService
 {
-    Task<CharacterProgressionResult> AwardExperienceAsync(Guid characterId, int experienceAmount);
-    Task<CharacterProgressionResult> ForceLevelUpAsync(Guid characterId, int levels);
-    Task<WalletSnapshotResult> AdjustCurrencyAsync(Guid characterId, string currencyType, int amount);
+    /// <summary>
+    /// Awards XP to a character. <paramref name="expectedOwnerUserId"/> is the deterministic
+    /// Discord-derived Guid the caller (hub) believes owns the character; the adapter verifies
+    /// the persisted owner matches and throws <see cref="UnauthorizedAccessException"/> if not
+    /// (defense-in-depth against stale SessionManager state).
+    /// </summary>
+    Task<CharacterProgressionResult> AwardExperienceAsync(Guid characterId, Guid expectedOwnerUserId, int experienceAmount);
+
+    /// <summary>
+    /// Forces N level-ups on the character, with the same ownership check as
+    /// <see cref="AwardExperienceAsync"/>.
+    /// </summary>
+    Task<CharacterProgressionResult> ForceLevelUpAsync(Guid characterId, Guid expectedOwnerUserId, int levels);
+
+    /// <summary>
+    /// Adjusts a single currency slot, with the same ownership check as
+    /// <see cref="AwardExperienceAsync"/>.
+    /// </summary>
+    Task<WalletSnapshotResult> AdjustCurrencyAsync(Guid characterId, Guid expectedOwnerUserId, string currencyType, int amount);
 }
 
 public class CharacterProgressionResult
