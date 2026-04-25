@@ -46,6 +46,9 @@ namespace DnDiscordAPI.Games.Character.Services
 
         public async Task<CharacterDto> CreateCharacterAsync(string discordUserId, CreateCharacterRequest request)
         {
+            if (!request.Class.IsPlayable())
+                throw new ArgumentException($"La classe {request.Class} n'est pas jouable.", nameof(request));
+
             // Obtenir les traits de race et de classe
             var raceTraits = RaceTraits.GetTraits(request.Race);
             var classTraits = ClassTraits.GetTraits(request.Class);
