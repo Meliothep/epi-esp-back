@@ -17,7 +17,6 @@ public class GameHub : Hub
     private readonly SessionManager _sessionManager;
     private readonly MessageSequencer _messageSequencer;
     private readonly StateManager _stateManager;
-    private readonly IGameActionValidator _validator;
     private readonly IUserContextService _userContextService;
     private readonly ICharacterLookupService _characterLookup;
     private readonly IInventoryGrantService _inventoryGrant;
@@ -29,7 +28,7 @@ public class GameHub : Hub
     /// Constructeur du GameHub
     /// </summary>
     public GameHub(ILogger<GameHub> logger, SessionManager sessionManager, MessageSequencer messageSequencer,
-        StateManager stateManager, IGameActionValidator validator, IUserContextService userContextService,
+        StateManager stateManager, IUserContextService userContextService,
         ICharacterLookupService characterLookup, IInventoryGrantService inventoryGrant,
         ICampaignMapLookupService mapLookup, CombatManager combatManager, SpawnPlacementService spawnPlacementService)
     {
@@ -37,7 +36,6 @@ public class GameHub : Hub
         _sessionManager = sessionManager;
         _messageSequencer = messageSequencer;
         _stateManager = stateManager;
-        _validator = validator;
         _userContextService = userContextService;
         _characterLookup = characterLookup;
         _inventoryGrant = inventoryGrant;
@@ -1264,8 +1262,8 @@ public class GameHub : Hub
     }
 
     /// <summary>
-    /// Envoyer l'utilisation d'une capacité
-    /// <paramref name="payload"/>
+    /// Envoyer l'utilisation d'une capacité. Le serveur applique les effets (HP/AP) de façon
+    /// autoritaire et diffuse le payload résolu — les peers n'ont plus à dépiler eux-mêmes.
     /// </summary>
     public async Task SendAbilityUsed(AbilityUsedPayload payload)
     {
@@ -1283,12 +1281,61 @@ public class GameHub : Hub
         if (!IsLegalCombatAction(session, payload.UnitId))
             throw new HubException("Unit cannot use abilities right now");
 
-        var message = _messageSequencer.CreateMessage(sessionId, "AbilityUsed", payload);
+        var result = await _combatManager.ApplyAbilityAsync(
+            session, payload.UnitId, payload.AbilityId, payload.Effects, payload.ApCost);
 
-        _logger.LogDebug("Ability used by unit {UnitId} in session {SessionId}",
-            payload.UnitId, sessionId);
+        if (result == null)
+        {
+            _logger.LogWarning("ApplyAbility rejected for unit {UnitId} in session {SessionId}",
+                payload.UnitId, sessionId);
+            throw new HubException("Ability not allowed: invalid state or insufficient AP");
+        }
+
+        var resolved = new AbilityUsedPayload
+        {
+            UnitId = result.UnitId,
+            AbilityId = result.AbilityId,
+            Targets = payload.Targets,
+            DiceResult = payload.DiceResult,
+            Effects = result.Effects,
+            ApCost = payload.ApCost,
+            Cooldown = payload.Cooldown,
+        };
+
+        var message = _messageSequencer.CreateMessage(sessionId, "AbilityUsed", resolved);
+
+        _logger.LogInformation("Ability {AbilityId} used by unit {UnitId} in session {SessionId}",
+            payload.AbilityId, payload.UnitId, sessionId);
 
         await Clients.Group(sessionId).SendAsync("AbilityUsed", message);
+
+        // Auto-end combat when a Damage effect kills the last unit on one side.
+        var anyKilled = result.Effects.Any(e =>
+            e.Type == "Damage"
+            && session.Combat.Units.TryGetValue(e.TargetId, out var t)
+            && !t.IsAlive);
+
+        if (anyKilled)
+        {
+            var resolution = await _combatManager.DetectOutcomeAsync(session);
+            if (resolution != null)
+            {
+                var turnEnded = new TurnEndedPayload
+                {
+                    UnitId = payload.UnitId,
+                    NextUnitId = resolution.CurrentUnitId,
+                    Phase = resolution.Phase,
+                    Round = resolution.Round,
+                    Outcome = resolution.Outcome,
+                    Units = session.Combat.Units.Values.ToList(),
+                };
+                _logger.LogInformation(
+                    "Combat auto-resolved by ability {AbilityId} in session {SessionId}: {Outcome}",
+                    payload.AbilityId, sessionId, resolution.Outcome);
+                var turnMessage = _messageSequencer.CreateMessage(sessionId, "TurnEnded", turnEnded);
+                await Clients.Group(sessionId).SendAsync("TurnEnded", turnMessage);
+            }
+        }
     }
 
     /// <summary>
@@ -1313,7 +1360,7 @@ public class GameHub : Hub
 
         var message = _messageSequencer.CreateMessage(sessionId, "GameStateSnapshot", snapshot);
         _logger.LogDebug("Game state snapshot stored and sent to session {SessionId}", sessionId);
-        await Clients.Caller.SendAsync("GameStateSnapshot", message);
+        await Clients.OthersInGroup(sessionId).SendAsync("GameStateSnapshot", message);
     }
 
     /// <summary>

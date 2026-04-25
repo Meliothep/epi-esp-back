@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Multiplayer.Models;
+using Multiplayer.Models.Messages;
 using static Multiplayer.Define;
 
 namespace Multiplayer.Services
@@ -227,6 +228,61 @@ namespace Multiplayer.Services
         }
 
         /// <summary>
+        /// Applies an ability use: deducts AP from the attacker and applies Damage/Heal effects to
+        /// targets server-side. Returns the resolved payload (server-computed Effects + remaining AP),
+        /// or null when the action is rejected (wrong turn, insufficient AP, resolved combat).
+        /// </summary>
+        public async Task<AbilityApplyResult?> ApplyAbilityAsync(
+            GameSession session, string unitId, string abilityId,
+            List<AbilityEffect> effects, int apCost)
+        {
+            await session.Combat.Lock.WaitAsync();
+            try
+            {
+                session.LastActivityAt = DateTime.UtcNow;
+                var combat = session.Combat;
+                if (combat.Phase == CombatPhase.Resolved) return null;
+                if (combat.Phase != CombatPhase.FreeRoam && combat.CurrentUnitId != unitId) return null;
+
+                if (!combat.Units.TryGetValue(unitId, out var attacker) || !attacker.IsAlive) return null;
+                if (apCost < 0 || attacker.CurrentAp < apCost) return null;
+
+                attacker.CurrentAp -= apCost;
+
+                var resolvedEffects = new List<AbilityEffect>();
+                foreach (var effect in effects)
+                {
+                    if (!combat.Units.TryGetValue(effect.TargetId, out var target)) continue;
+                    var value = Math.Max(0, effect.Value);
+                    int actualValue;
+                    switch (effect.Type)
+                    {
+                        case "Damage":
+                            var before = target.CurrentHp;
+                            target.CurrentHp = Math.Max(0, target.CurrentHp - value);
+                            actualValue = before - target.CurrentHp;
+                            break;
+                        case "Heal":
+                            var beforeHeal = target.CurrentHp;
+                            target.CurrentHp = Math.Min(target.MaxHp, target.CurrentHp + value);
+                            actualValue = target.CurrentHp - beforeHeal;
+                            break;
+                        default:
+                            actualValue = value;
+                            break;
+                    }
+                    resolvedEffects.Add(new AbilityEffect { Type = effect.Type, TargetId = effect.TargetId, Value = actualValue });
+                }
+
+                return new AbilityApplyResult(unitId, abilityId, attacker.CurrentAp, resolvedEffects);
+            }
+            finally
+            {
+                session.Combat.Lock.Release();
+            }
+        }
+
+        /// <summary>
         /// Forcibly ends combat (e.g. DM-triggered). Transitions back to FreeRoam and clears turn state.
         /// </summary>
         public async Task EndCombatAsync(GameSession session)
@@ -289,4 +345,6 @@ namespace Multiplayer.Services
     public record CombatMoveOutcome(string UnitId, int X, int Y, int ApRemaining);
 
     public record CombatAttackOutcome(string AttackerId, string TargetId, int Damage, int TargetHp, bool TargetAlive, int AttackerApRemaining);
+
+    public record AbilityApplyResult(string UnitId, string AbilityId, int AttackerApRemaining, List<AbilityEffect> Effects);
 }
