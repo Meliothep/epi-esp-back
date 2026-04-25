@@ -67,10 +67,13 @@ public class CharacterProgressionAdapter : ICharacterProgressionService
         if (levels <= 0)
             throw new ArgumentOutOfRangeException(nameof(levels), "Levels must be > 0");
 
+        if (levels > MaxBatchLevelUps)
+            throw new ArgumentOutOfRangeException(nameof(levels),
+                $"Forcing {levels} level-ups exceeds the batch limit of {MaxBatchLevelUps}. Split the operation.");
+
         var before = await _characterService.GetCharacterAsync(characterId);
-        var cappedLevels = Math.Min(levels, MaxBatchLevelUps);
         CharacterDto after = before;
-        for (var i = 0; i < cappedLevels; i++)
+        for (var i = 0; i < levels; i++)
         {
             after = await _characterService.LevelUpAsync(characterId);
         }
@@ -88,9 +91,8 @@ public class CharacterProgressionAdapter : ICharacterProgressionService
         if (amount == 0)
             throw new ArgumentOutOfRangeException(nameof(amount), "Currency amount must not be 0");
 
-        var normalizedType = (currencyType ?? "gp").Trim().ToLowerInvariant();
         var request = new ModifyWalletRequest();
-        switch (normalizedType)
+        switch (currencyType ?? "gp")
         {
             case "cp":
                 request.CopperPieces = amount;

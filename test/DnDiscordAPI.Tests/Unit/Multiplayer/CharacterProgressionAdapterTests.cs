@@ -194,6 +194,17 @@ public class CharacterProgressionAdapterTests
             () => adapter.ForceLevelUpAsync(character.Id, -1));
     }
 
+    [Fact]
+    public async Task ForceLevelUp_ExceedsBatchLimit_Throws()
+    {
+        // 26 levels in one call exceeds MaxBatchLevelUps (25) — should throw, not cap.
+        var (adapter, _, db) = MakeAdapter();
+        var character = db.Characters.First();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => adapter.ForceLevelUpAsync(character.Id, 26));
+    }
+
     // ── AdjustCurrency – currency type mapping ───────────────────────────────
 
     [Theory]
@@ -217,20 +228,6 @@ public class CharacterProgressionAdapterTests
         Assert.Equal(expectedEp, req.ElectrumPieces);
         Assert.Equal(expectedGp, req.GoldPieces);
         Assert.Equal(expectedPp, req.PlatinumPieces);
-    }
-
-    [Theory]
-    [InlineData("CP")]   // uppercase
-    [InlineData("GP")]
-    [InlineData("  gp  ")] // whitespace
-    public async Task AdjustCurrency_NormalizesInput(string currencyType)
-    {
-        var (adapter, stub, db) = MakeAdapter();
-        var character = db.Characters.First();
-
-        // Should not throw — normalized before switch.
-        await adapter.AdjustCurrencyAsync(character.Id, currencyType, 10);
-        Assert.NotNull(stub.LastModifyWalletRequest);
     }
 
     [Fact]

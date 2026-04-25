@@ -1140,7 +1140,17 @@ public class GameHub : Hub
         if (targetPlayer.SelectedCharacterId is not Guid characterId)
             throw new HubException("Target player has not selected a character");
 
-        var result = await _characterProgression.AwardExperienceAsync(characterId, payload.ExperienceAmount);
+        CharacterProgressionResult result;
+        try
+        {
+            result = await _characterProgression.AwardExperienceAsync(characterId, payload.ExperienceAmount);
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            throw new HubException(ex.ParamName == nameof(payload.ExperienceAmount)
+                ? ex.Message
+                : "Invalid XP award parameters.");
+        }
 
         await SyncCharacterHpToActiveUnitAsync(session, payload.TargetUserId, result.CurrentHitPoints, result.MaxHitPoints);
 
@@ -1200,7 +1210,17 @@ public class GameHub : Hub
         if (targetPlayer.SelectedCharacterId is not Guid characterId)
             throw new HubException("Target player has not selected a character");
 
-        var result = await _characterProgression.ForceLevelUpAsync(characterId, payload.Levels);
+        CharacterProgressionResult result;
+        try
+        {
+            result = await _characterProgression.ForceLevelUpAsync(characterId, payload.Levels);
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            throw new HubException(ex.ParamName == nameof(payload.Levels)
+                ? ex.Message
+                : "Invalid level-up parameters.");
+        }
 
         await SyncCharacterHpToActiveUnitAsync(session, payload.TargetUserId, result.CurrentHitPoints, result.MaxHitPoints);
 
