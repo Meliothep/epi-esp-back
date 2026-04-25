@@ -128,34 +128,60 @@ public class GameHub : Hub
         // Replay GameStarted so the caller re-initialises the board with the
         // current map + unit roster. The existing GameStarted handler on the
         // front already routes through startGame() → initializeFreeRoam.
-        var assignments = session.Combat.Units.Values
-            .Where(u => u.Team == UnitTeam.Player || u.Team == UnitTeam.Ally)
-            .Select(u => new UnitAssignment
-            {
-                UserId = u.OwnerUserId ?? Guid.Empty,
-                UnitId = u.UnitId,
-                UnitName = u.Name,
-                // Preserved from the original assignment so the rejoin snapshot
-                // re-seeds the front's UnitType (warrior / mage / archer) via
-                // CharacterToUnit.classToUnitType instead of falling back to
-                // the empty-string default (which spawned warrior for everyone).
-                CharacterClass = u.CharacterClass,
-                MaxHp = u.MaxHp,
-                CurrentHp = u.CurrentHp,
-                Initiative = u.Initiative,
-                MovementRange = 6,
-                AttackRange = 1,
-            })
-            .ToList();
+        //
+        // Snapshot all combat fields under the lock so concurrent EndTurnAsync /
+        // ApplyAbilityAsync cannot produce torn reads (e.g. Phase seen as
+        // PlayerTurn while CurrentUnitId already advanced to the next unit).
+        List<UnitAssignment> assignments;
+        CombatPhase combatPhase;
+        int combatRound;
+        string? currentUnitId;
+        List<string> turnOrderSnapshot;
+        List<UnitRuntimeState> unitListSnapshot;
+
+        await session.Combat.Lock.WaitAsync();
+        try
+        {
+            assignments = session.Combat.Units.Values
+                .Where(u => u.Team == UnitTeam.Player || u.Team == UnitTeam.Ally)
+                .Select(u => new UnitAssignment
+                {
+                    UserId = u.OwnerUserId ?? Guid.Empty,
+                    UnitId = u.UnitId,
+                    UnitName = u.Name,
+                    // Preserved from the original assignment so the rejoin snapshot
+                    // re-seeds the front's UnitType (warrior / mage / archer) via
+                    // CharacterToUnit.classToUnitType instead of falling back to
+                    // the empty-string default (which spawned warrior for everyone).
+                    CharacterClass = u.CharacterClass,
+                    MaxHp = u.MaxHp,
+                    CurrentHp = u.CurrentHp,
+                    Initiative = u.Initiative,
+                    MovementRange = 6,
+                    AttackRange = 1,
+                })
+                .ToList();
+            combatPhase = session.Combat.Phase;
+            combatRound = session.Combat.Round;
+            currentUnitId = session.Combat.CurrentUnitId;
+            turnOrderSnapshot = session.Combat.TurnOrder.ToList();
+            unitListSnapshot = session.Combat.Units.Values.ToList();
+        }
+        finally
+        {
+            session.Combat.Lock.Release();
+        }
 
         // Resolve the map blob so the reconnecting client can actually render
         // the board. Without this the front sits on "Setting up…" forever
         // because GameStarted arrives with MapData = null.
         string? mapData = null;
+        bool rejoinMapLookupAttempted = false;
         if (session.CampaignId is Guid campaignIdForMap
             && !string.IsNullOrEmpty(session.MapId)
             && Guid.TryParse(session.MapId, out var mapGuid))
         {
+            rejoinMapLookupAttempted = true;
             try
             {
                 var map = await _mapLookup.GetMapAsync(campaignIdForMap, mapGuid);
@@ -165,6 +191,16 @@ public class GameHub : Hub
             {
                 _logger.LogWarning(ex, "Map lookup failed during rejoin for session {SessionId}", session.SessionId);
             }
+        }
+
+        if (rejoinMapLookupAttempted && string.IsNullOrEmpty(mapData))
+        {
+            await Clients.Caller.SendAsync("MapLoadFailed", new
+            {
+                sessionId = session.SessionId,
+                mapId = session.MapId,
+                reason = "Map data could not be loaded. The board may not render correctly.",
+            });
         }
 
         await Clients.Caller.SendAsync("GameStarted", new GameStartedPayload
@@ -177,23 +213,24 @@ public class GameHub : Hub
         // If combat is active, replay CombatStarted so the caller picks up the
         // turn order + current unit without re-rolling initiative. Resolved /
         // FreeRoam phases are skipped — GameStarted above is enough.
-        if (session.Combat.Phase != CombatPhase.FreeRoam
-            && session.Combat.Phase != CombatPhase.Resolved
-            && session.Combat.TurnOrder.Count > 0)
+        if (combatPhase != CombatPhase.FreeRoam
+            && combatPhase != CombatPhase.Resolved
+            && turnOrderSnapshot.Count > 0)
         {
+            var unitLookup = unitListSnapshot.ToDictionary(u => u.UnitId);
             var combatPayload = new CombatStartedPayload
             {
-                Phase = session.Combat.Phase,
-                Round = session.Combat.Round,
-                CurrentUnitId = session.Combat.CurrentUnitId,
-                TurnOrder = session.Combat.TurnOrder.ToList(),
-                Units = session.Combat.Units.Values.ToList(),
-                InitiativeOrder = session.Combat.TurnOrder
+                Phase = combatPhase,
+                Round = combatRound,
+                CurrentUnitId = currentUnitId,
+                TurnOrder = turnOrderSnapshot,
+                Units = unitListSnapshot,
+                InitiativeOrder = turnOrderSnapshot
                     .Select(id => new InitiativeEntry
                     {
                         UnitId = id,
-                        Initiative = session.Combat.Units.TryGetValue(id, out var u) ? u.Initiative : 0,
-                        ControllerId = session.Combat.Units.TryGetValue(id, out var u2) ? (u2.OwnerUserId ?? Guid.Empty) : Guid.Empty,
+                        Initiative = unitLookup.TryGetValue(id, out var u) ? u.Initiative : 0,
+                        ControllerId = unitLookup.TryGetValue(id, out var u2) ? (u2.OwnerUserId ?? Guid.Empty) : Guid.Empty,
                     })
                     .ToList(),
             };
@@ -202,7 +239,7 @@ public class GameHub : Hub
         }
 
         _logger.LogInformation("Rejoined user {UserId} to session {SessionId} (phase {Phase})",
-            userId, session.SessionId, session.Combat.Phase);
+            userId, session.SessionId, combatPhase);
     }
 
     /// <summary>
@@ -540,7 +577,15 @@ public class GameHub : Hub
         if (!allowRestart && session.State != SessionState.Lobby)
             throw new HubException("Game already started");
 
-        // Set session state
+        // Set session state.
+        // KNOWN RACE (POC-scope): State/MapId/LastActivityAt are mutated here
+        // without holding session.Combat.Lock. A concurrent EndTurnAsync or
+        // DmStartCombat running on the previous combat can observe InProgress
+        // while combat.Units still holds the old roster. Acceptable for POC
+        // because (a) the DM is the only caller and the client UX serialises
+        // DM actions, and (b) widening the lock across the subsequent async
+        // map-lookup would require a more complex two-phase commit. Track as
+        // tech-debt if concurrent DM tooling is ever added.
         session.State = SessionState.InProgress;
         session.MapId = mapId;
         session.LastActivityAt = DateTime.UtcNow;
@@ -549,10 +594,12 @@ public class GameHub : Hub
         // maps live in Postgres, not localStorage, so the front's DmRestartGame
         // wrapper can't produce mapData for them on its own. Mirror the lookup
         // done in SendRejoinSnapshotAsync so every client gets the blob.
+        bool mapLookupAttempted = false;
         if (string.IsNullOrEmpty(mapData)
             && session.CampaignId is Guid campaignIdForMap
             && Guid.TryParse(mapId, out var mapGuid))
         {
+            mapLookupAttempted = true;
             try
             {
                 var map = await _mapLookup.GetMapAsync(campaignIdForMap, mapGuid);
@@ -562,6 +609,19 @@ public class GameHub : Hub
             {
                 _logger.LogWarning(ex, "Map lookup failed during (re)start for session {SessionId}", sessionId);
             }
+        }
+
+        // If a campaign-map lookup was attempted but returned nothing, every client
+        // will be stuck on "Setting up..." — inform the DM so they can retry or
+        // switch maps. We still broadcast GameStarted so non-campaign clients
+        // (who provide their own mapData) are unaffected.
+        if (mapLookupAttempted && string.IsNullOrEmpty(mapData))
+        {
+            await Clients.Caller.SendAsync("StartFailed", new
+            {
+                reason = "Map data could not be loaded from the campaign. Try switching maps or reloading.",
+                mapId,
+            });
         }
 
         // Build unit assignments for each player. DM is a pure overseer — they don't
@@ -604,13 +664,25 @@ public class GameHub : Hub
                     // Character lookup can fail for benign reasons (character was
                     // deleted after the player joined the session) or for real
                     // infrastructure reasons (DB timeout, misconfigured service).
-                    // Log the failure so a silent "everyone gets defaults" regression
-                    // is visible in telemetry, but still fall back to a default
-                    // assignment so the game can start.
+                    // Log the failure and notify the affected player so they know
+                    // their character was substituted — a misconfigured DB would
+                    // otherwise silently downgrade every player to defaults.
                     _logger.LogWarning(ex,
                         "Character lookup failed for player {UserId} (characterId {CharacterId}); falling back to default assignment",
                         player.UserId, player.SelectedCharacterId);
                     assignment = BuildDefaultAssignment(player, player.SelectedDefaultTemplate);
+
+                    var playerConn = session.Players
+                        .FirstOrDefault(p => p.UserId == player.UserId)?.ConnectionId;
+                    if (!string.IsNullOrEmpty(playerConn))
+                    {
+                        await Clients.Client(playerConn).SendAsync("CharacterLookupFailed", new
+                        {
+                            userId = player.UserId,
+                            characterId = player.SelectedCharacterId,
+                            fallbackTemplate = assignment.CharacterClass,
+                        });
+                    }
                 }
             }
             else
@@ -858,7 +930,14 @@ public class GameHub : Hub
         if (session.DmUserId != GetUserId())
             throw new HubException("Only the DM can start combat");
 
-        var result = await _combatManager.StartCombatAsync(session, session.Combat.Units.Values.ToList());
+        // Snapshot the roster under the lock so a concurrent DmSpawnUnit /
+        // DmAdjustHp cannot mutate the dictionary while we enumerate it.
+        List<UnitRuntimeState> unitSnapshot;
+        await session.Combat.Lock.WaitAsync();
+        try { unitSnapshot = session.Combat.Units.Values.ToList(); }
+        finally { session.Combat.Lock.Release(); }
+
+        var result = await _combatManager.StartCombatAsync(session, unitSnapshot);
 
         _logger.LogInformation(
             "DM {UserId} started combat in session {SessionId}: {UnitCount} units, first {CurrentUnit}",
@@ -931,8 +1010,8 @@ public class GameHub : Hub
         if (string.IsNullOrWhiteSpace(unitId))
             throw new HubException("unitId required");
 
-        UnitRuntimeState? unit;
         int newHp;
+        int maxHp;
         bool wasAlive;
         bool isAlive;
         int appliedDelta;
@@ -940,12 +1019,13 @@ public class GameHub : Hub
         await session.Combat.Lock.WaitAsync();
         try
         {
-            if (!session.Combat.Units.TryGetValue(unitId, out unit) || unit is null)
+            if (!session.Combat.Units.TryGetValue(unitId, out var unit) || unit is null)
                 throw new HubException($"Unit '{unitId}' not in combat roster");
 
             wasAlive = unit.IsAlive;
             var before = unit.CurrentHp;
-            newHp = Math.Clamp(before + delta, 0, unit.MaxHp);
+            maxHp = unit.MaxHp; // captured inside lock — safe to use after release
+            newHp = Math.Clamp(before + delta, 0, maxHp);
             appliedDelta = newHp - before;
             unit.CurrentHp = newHp;
             isAlive = unit.IsAlive; // derived from CurrentHp on UnitRuntimeState
@@ -956,13 +1036,13 @@ public class GameHub : Hub
         }
 
         _logger.LogInformation("DM {UserId} adjusted {UnitId} HP by {Delta} -> {NewHp}/{MaxHp} (session {SessionId})",
-            GetUserId(), unitId, appliedDelta, newHp, unit.MaxHp, sessionId);
+            GetUserId(), unitId, appliedDelta, newHp, maxHp, sessionId);
 
         var payload = new UnitHpAdjustedPayload
         {
             UnitId = unitId,
             Hp = newHp,
-            MaxHp = unit.MaxHp,
+            MaxHp = maxHp,
             IsAlive = isAlive,
             Delta = appliedDelta,
             WasAlive = wasAlive,
@@ -1036,10 +1116,18 @@ public class GameHub : Hub
         }
 
         if (!unitFound)
+        {
             _logger.LogWarning("DmMoveToken: unit {UnitId} not found in session {SessionId} — server state unchanged, broadcast skipped",
                 payload.UnitId, sessionId);
-
-        if (!unitFound) return;
+            // Notify the DM so their optimistic UI snap-back is explained rather
+            // than happening silently on the next TurnEnded broadcast.
+            await Clients.Caller.SendAsync("DmMoveTokenRejected", new
+            {
+                unitId = payload.UnitId,
+                reason = "Unit not found in combat roster",
+            });
+            return;
+        }
 
         var message = _messageSequencer.CreateMessage(sessionId, "DmTokenMoved", payload);
         await Clients.Group(sessionId).SendAsync("DmTokenMoved", message);
@@ -1122,20 +1210,24 @@ public class GameHub : Hub
         // Parse HP / AP / initiative from the client-provided stats blob so the
         // server's combat state matches what the DM sees on the board. Hard-coding
         // HP=10 meant enemies got one-shot by mid-tier abilities.
-        int maxHp = 10, currentHp = 10, maxAp = 4, currentAp = 4, initiative = 0;
+        // We throw HubException on parse failure: proceeding with maxHp=10 defaults
+        // would spawn a custom-stat boss at 10 HP (one-shot), which is worse than
+        // surfacing the error so the DM can fix their payload.
+        int maxHp, currentHp, maxAp, currentAp, initiative;
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(payload.StatsJson);
             var root = doc.RootElement;
-            if (root.TryGetProperty("maxHealth", out var mh) && mh.TryGetInt32(out var mhVal)) maxHp = mhVal;
-            if (root.TryGetProperty("currentHealth", out var ch) && ch.TryGetInt32(out var chVal)) currentHp = chVal;
-            if (root.TryGetProperty("maxActionPoints", out var map) && map.TryGetInt32(out var mapVal)) maxAp = mapVal;
-            if (root.TryGetProperty("currentActionPoints", out var cap) && cap.TryGetInt32(out var capVal)) currentAp = capVal;
-            if (root.TryGetProperty("initiative", out var ini) && ini.TryGetInt32(out var iniVal)) initiative = iniVal;
+            maxHp      = root.TryGetProperty("maxHealth",           out var mh)  && mh.TryGetInt32(out var mhVal)  ? mhVal  : 10;
+            currentHp  = root.TryGetProperty("currentHealth",       out var ch)  && ch.TryGetInt32(out var chVal)  ? chVal  : maxHp;
+            maxAp      = root.TryGetProperty("maxActionPoints",     out var map) && map.TryGetInt32(out var mapVal) ? mapVal : 4;
+            currentAp  = root.TryGetProperty("currentActionPoints", out var cap) && cap.TryGetInt32(out var capVal) ? capVal : maxAp;
+            initiative = root.TryGetProperty("initiative",          out var ini) && ini.TryGetInt32(out var iniVal) ? iniVal : 0;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "DmSpawnUnit: failed to parse statsJson for unit {UnitId}; using defaults", payload.UnitId);
+            _logger.LogWarning(ex, "DmSpawnUnit: statsJson parse failed for unit {UnitId}", payload.UnitId);
+            throw new HubException($"Invalid statsJson for unit '{payload.UnitId}': {ex.Message}");
         }
 
         var runtime = new UnitRuntimeState
@@ -1297,7 +1389,7 @@ public class GameHub : Hub
             AbilityId = result.AbilityId,
             Targets = payload.Targets,
             DiceResult = payload.DiceResult,
-            Effects = result.Effects,
+            Effects = result.Effects.ToList(),
             ApCost = payload.ApCost,
             Cooldown = payload.Cooldown,
         };
@@ -1388,12 +1480,16 @@ public class GameHub : Hub
                 {
                     session.Combat.Lock.Release();
                 }
+                // Only cache when the session exists — if it was just removed the
+                // cache entry would be permanent (CleanupStaleSessionsByPolicy
+                // already evicted it from _sessions so it will never call ClearSnapshot).
+                _stateManager.SetSnapshot(sessionId, snapshot);
             }
             else
             {
+                // Session is gone: return an empty snapshot directly without caching.
                 snapshot = new GameStateSnapshot { SessionId = sessionId };
             }
-            _stateManager.SetSnapshot(sessionId, snapshot);
         }
 
         var message = _messageSequencer.CreateMessage(sessionId, "FullStateSync", snapshot);

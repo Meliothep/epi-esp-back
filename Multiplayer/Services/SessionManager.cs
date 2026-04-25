@@ -507,13 +507,25 @@ public class SessionManager
         var now = DateTime.UtcNow;
         var toRemove = _sessions.Values
             .Where(s =>
+            {
                 // Never evict a session while any player is currently connected —
                 // the LastActivityAt heuristic isn't enough when combat commands
                 // don't always touch it. An active websocket is the authoritative
                 // "still alive" signal.
-                s.Players.All(p => p.Status != Define.ConnectionStatus.Connected) &&
-                ((s.DmDisconnectedAt.HasValue && (now - s.DmDisconnectedAt.Value) >= dmDisconnectedThreshold) ||
-                 (s.LastActivityAt < now - inactivityThreshold)))
+                //
+                // Players is a List<SessionPlayer> mutated by JoinSession / LeaveSession
+                // on other threads. Snapshot it with ToList() so the LINQ predicate
+                // runs on a stable copy and can't throw InvalidOperationException
+                // ("Collection was modified") mid-iteration — which the background
+                // service catch would swallow, accumulating stale sessions forever.
+                List<SessionPlayer> players;
+                try { players = s.Players.ToList(); }
+                catch (InvalidOperationException) { return false; } // mutated, skip this tick
+
+                return players.All(p => p.Status != Define.ConnectionStatus.Connected) &&
+                       ((s.DmDisconnectedAt.HasValue && (now - s.DmDisconnectedAt.Value) >= dmDisconnectedThreshold) ||
+                        (s.LastActivityAt < now - inactivityThreshold));
+            })
             .ToList();
 
         foreach (var session in toRemove)
