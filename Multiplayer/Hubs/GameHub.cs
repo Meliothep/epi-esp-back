@@ -1,6 +1,9 @@
+using DnDiscord.Campaign.DataAccess;
+using DnDiscord.Campaign.DataAccess.Models;
 using DnDiscord.Campaign.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Multiplayer.Models;
 using Multiplayer.Models.Messages;
@@ -22,6 +25,7 @@ public class GameHub : Hub
     private readonly ICampaignMapLookupService _mapLookup;
     private readonly CombatManager _combatManager;
     private readonly SpawnPlacementService _spawnPlacementService;
+    private readonly IServiceProvider _serviceProvider;
 
     /// <summary>
     /// Constructeur du GameHub
@@ -30,7 +34,8 @@ public class GameHub : Hub
         IUserContextService userContextService,
         ICharacterLookupService characterLookup, IInventoryGrantService inventoryGrant,
         ICampaignMapLookupService mapLookup, CombatManager combatManager,
-        SpawnPlacementService spawnPlacementService)
+        SpawnPlacementService spawnPlacementService,
+        IServiceProvider serviceProvider)
     {
         _logger = logger;
         _sessionManager = sessionManager;
@@ -41,6 +46,7 @@ public class GameHub : Hub
         _mapLookup = mapLookup;
         _combatManager = combatManager;
         _spawnPlacementService = spawnPlacementService;
+        _serviceProvider = serviceProvider;
     }
 
     /// <summary>
@@ -1393,6 +1399,37 @@ public class GameHub : Hub
         }
 
         var player = session.Players.FirstOrDefault(p => p.UserId == userId);
+
+        // Persist the roll result to the campaign journal so it survives the
+        // in-memory session and shows up in the campaign log. DB failure must
+        // not block the live broadcast — the play loop is more important than
+        // the journal for POC scope.
+        if (session.CampaignId is Guid campaignId)
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<CampaignDbContext>();
+                db.RollHistory.Add(new RollHistoryEntry
+                {
+                    CampaignId = campaignId,
+                    SessionId = sessionId,
+                    RequestId = pending.RequestId,
+                    UserId = userId,
+                    UserName = player?.UserName,
+                    DiceType = pending.DiceType,
+                    Value = value,
+                    Label = pending.Label,
+                });
+                await db.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to persist roll result for request {RequestId} session {SessionId}",
+                    pending.RequestId, sessionId);
+            }
+        }
 
         var rollResultPayload = new RollResultBroadcastPayload(
             pending.RequestId,
