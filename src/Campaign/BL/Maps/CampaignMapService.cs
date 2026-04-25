@@ -20,7 +20,7 @@ public class CampaignMapService : ICampaignMapService
             .Where(m => m.CampaignId == campaignId)
             .OrderBy(m => m.CreatedAt)
             .ToListAsync(ct);
-        return rows.Select(Map).ToList();
+        return rows.Select(ToDto).ToList();
     }
 
     public async Task<CampaignMapDto?> GetAsync(Guid campaignId, Guid mapId, CancellationToken ct = default)
@@ -28,16 +28,17 @@ public class CampaignMapService : ICampaignMapService
         var row = await _db.Maps
             .AsNoTracking()
             .FirstOrDefaultAsync(m => m.CampaignId == campaignId && m.Id == mapId, ct);
-        return row is null ? null : Map(row);
+        return row is null ? null : ToDto(row);
     }
 
-    public async Task<CampaignMapDto> CreateAsync(Guid campaignId, CreateCampaignMapRequest request, CancellationToken ct = default)
+    public async Task<CampaignMapDto> CreateAsync(Guid campaignId, Guid ownerId, CreateCampaignMapRequest request, CancellationToken ct = default)
     {
         var now = DateTime.UtcNow;
         var map = new CampaignMap
         {
             Id = Guid.NewGuid(),
             CampaignId = campaignId,
+            OwnerId = ownerId, // requis pour que PUT /api/maps/mine/:id fonctionne
             Name = request.Name.Trim(),
             Data = request.Data,
             CreatedAt = now,
@@ -45,7 +46,7 @@ public class CampaignMapService : ICampaignMapService
         };
         _db.Maps.Add(map);
         await _db.SaveChangesAsync(ct);
-        return Map(map);
+        return ToDto(map);
     }
 
     public async Task<CampaignMapDto?> UpdateAsync(Guid campaignId, Guid mapId, UpdateCampaignMapRequest request, CancellationToken ct = default)
@@ -56,10 +57,11 @@ public class CampaignMapService : ICampaignMapService
 
         if (!string.IsNullOrWhiteSpace(request.Name)) map.Name = request.Name.Trim();
         if (request.Data is not null) map.Data = request.Data;
+        if (request.IsPublic.HasValue) map.IsPublic = request.IsPublic.Value;
         map.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
-        return Map(map);
+        return ToDto(map);
     }
 
     public async Task<bool> DeleteAsync(Guid campaignId, Guid mapId, CancellationToken ct = default)
@@ -73,6 +75,14 @@ public class CampaignMapService : ICampaignMapService
         return true;
     }
 
-    private static CampaignMapDto Map(CampaignMap m) =>
-        new(m.Id, m.CampaignId, m.Name, m.Data, m.CreatedAt, m.UpdatedAt);
+    public async Task<CampaignMapDto?> GetByMapIdAsync(Guid mapId, CancellationToken ct = default)
+    {
+        var row = await _db.Maps
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id == mapId, ct);
+        return row is null ? null : ToDto(row);
+    }
+
+    internal static CampaignMapDto ToDto(CampaignMap m) =>
+        new(m.Id, m.CampaignId, m.OwnerId, m.IsPublic, m.Name, m.Data, m.CreatedAt, m.UpdatedAt);
 }

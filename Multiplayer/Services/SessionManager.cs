@@ -386,7 +386,7 @@ public class SessionManager
     /// Définir le personnage sélectionné par un joueur dans la session.
     /// Choosing a real character clears any previously-picked default template.
     /// </summary>
-    public bool SetPlayerCharacter(string sessionId, Guid userId, Guid? characterId)
+    public bool SetPlayerCharacter(string sessionId, Guid userId, Guid? characterId, string? characterName = null)
     {
         if (!_sessions.TryGetValue(sessionId, out var session))
             return false;
@@ -398,6 +398,7 @@ public class SessionManager
                 return false;
 
             player.SelectedCharacterId = characterId;
+            player.SelectedCharacterName = characterId.HasValue ? characterName : null;
             if (characterId.HasValue) player.SelectedDefaultTemplate = null;
             session.LastActivityAt = DateTime.UtcNow;
             return true;

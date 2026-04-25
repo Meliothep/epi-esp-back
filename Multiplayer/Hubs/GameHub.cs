@@ -383,6 +383,74 @@ public class GameHub : Hub
     }
 
     /// <summary>
+    /// DM quitte la carte en cours et passe au nœud suivant du scénario.
+    /// Diffuse <c>CampaignMapExited</c> au groupe campagne pour que les joueurs
+    /// naviguent eux aussi vers la page de session et enchaînent le scénario.
+    /// </summary>
+    /// <param name="campaignId">Identifiant de la campagne.</param>
+    /// <param name="nodeId">ID du nœud carte qui vient d'être joué.</param>
+    public async Task DmExitMap(Guid campaignId, string nodeId)
+    {
+        var userId = GetUserId();
+
+        await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("CampaignMapExited", new
+        {
+            campaignId,
+            nodeId,
+            exitedByUserId = userId.ToString(),
+        });
+
+        _logger.LogDebug("DM {UserId} exited campaign map node {NodeId} in campaign {CampaignId}",
+            userId, nodeId, campaignId);
+    }
+
+    /// <summary>
+    /// DM lance une carte depuis un nœud de type 'map' dans le scénario.
+    /// Diffuse <c>CampaignMapLaunched</c> au groupe campagne avec la configuration
+    /// complète (mapId, spawnPoint, exitCells, trapCells) pour que les joueurs
+    /// puissent aussi naviguer vers le board et charger la même carte.
+    /// </summary>
+    /// <param name="campaignId">Identifiant de la campagne.</param>
+    /// <param name="configJson">Sérialisation JSON de SessionMapConfig côté front.</param>
+    public async Task DmLaunchCampaignMap(Guid campaignId, string configJson)
+    {
+        var userId = GetUserId();
+
+        await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("CampaignMapLaunched", new
+        {
+            campaignId,
+            configJson,
+            launchedByUserId = userId.ToString(),
+        });
+
+        _logger.LogDebug("DM {UserId} launched campaign map in campaign {CampaignId}",
+            userId, campaignId);
+    }
+
+    /// <summary>
+    /// DM avance le scénario vers le nœud suivant.
+    /// Tous les abonnés du groupe campagne reçoivent l'événement "NodeAdvanced"
+    /// afin que les joueurs suivent automatiquement sans clic supplémentaire.
+    /// </summary>
+    /// <param name="campaignId">Identifiant de la campagne.</param>
+    /// <param name="fromNodeId">Identifiant du nœud de départ (utilisé comme garde côté client).</param>
+    /// <param name="nextNodeId">Identifiant du nœud cible.</param>
+    public async Task DmAdvanceNode(Guid campaignId, string fromNodeId, string nextNodeId)
+    {
+        var userId = GetUserId();
+
+        await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("NodeAdvanced", new
+        {
+            fromNodeId,
+            nextNodeId,
+            advancedByUserId = userId.ToString(),
+        });
+
+        _logger.LogDebug("DM {UserId} advanced scenario from {FromNode} to {NextNode} in campaign {CampaignId}",
+            userId, fromNodeId, nextNodeId, campaignId);
+    }
+
+    /// <summary>
     /// Diffuse le vote d'un joueur pour un choix sur un bloc Choices.
     /// Tous les abonnés du groupe campagne reçoivent l'événement "ChoiceVoted".
     /// </summary>
@@ -591,7 +659,24 @@ public class GameHub : Hub
             throw new HubException("Not in a session");
 
         var userId = GetUserId();
-        _sessionManager.SetPlayerCharacter(sessionId, userId, characterId);
+
+        // Résoudre le nom du personnage pour l'afficher dans la liste des joueurs
+        // sans lookup supplémentaire à chaque broadcast PlayerUpdated.
+        string? characterName = null;
+        if (characterId.HasValue)
+        {
+            try
+            {
+                var character = await _characterLookup.GetCharacterAsync(characterId.Value);
+                characterName = character?.Name;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not resolve character name for {CharacterId}", characterId);
+            }
+        }
+
+        _sessionManager.SetPlayerCharacter(sessionId, userId, characterId, characterName);
 
         var session = _sessionManager.GetSession(sessionId);
         if (session == null) return;
@@ -1040,6 +1125,7 @@ public class GameHub : Hub
                 Role = p.Role,
                 Status = p.Status,
                 SelectedCharacterId = p.SelectedCharacterId,
+                SelectedCharacterName = p.SelectedCharacterName,
                 SelectedDefaultTemplate = p.SelectedDefaultTemplate,
             }).ToList()
         };

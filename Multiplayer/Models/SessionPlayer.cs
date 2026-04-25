@@ -19,6 +19,9 @@ namespace Multiplayer.Models
         public DateTime? DisconnectedAt { get; set; }
         public Guid? SelectedCharacterId { get; set; }
 
+        /// <summary>Nom du personnage sélectionné (résolu à la sélection pour éviter un lookup à chaque broadcast).</summary>
+        public string? SelectedCharacterName { get; set; }
+
         /// <summary>
         /// A preset template ("warrior" | "mage" | "archer") the player picked in
         /// the lobby as a no-persisted-character quickstart. Mutually exclusive

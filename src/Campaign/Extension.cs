@@ -83,6 +83,7 @@ public static class CampaignExtensions
         builder.Services.AddScoped<IUserContextService, UserContextService>();
         builder.Services.AddScoped<ICampaignSessionService, CampaignSessionService>();
         builder.Services.AddScoped<ICampaignMapService, CampaignMapService>();
+        builder.Services.AddScoped<IUserMapService, UserMapService>();
 
         return builder;
     }

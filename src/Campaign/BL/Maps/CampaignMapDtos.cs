@@ -4,7 +4,9 @@ namespace DnDiscord.Campaign.BL.Maps;
 
 public record CampaignMapDto(
     Guid Id,
-    Guid CampaignId,
+    Guid? CampaignId,
+    Guid OwnerId,
+    bool IsPublic,
     string Name,
     string Data,
     DateTime CreatedAt,
@@ -27,4 +29,26 @@ public class UpdateCampaignMapRequest
     public string? Name { get; set; }
 
     public string? Data { get; set; }
+
+    public bool? IsPublic { get; set; }
+}
+
+public class CreateUserMapRequest
+{
+    [Required]
+    [StringLength(200, MinimumLength = 1)]
+    public string Name { get; set; } = string.Empty;
+
+    [Required]
+    public string Data { get; set; } = string.Empty;
+}
+
+public class UpdateUserMapRequest
+{
+    [StringLength(200, MinimumLength = 1)]
+    public string? Name { get; set; }
+
+    public string? Data { get; set; }
+
+    public bool? IsPublic { get; set; }
 }
