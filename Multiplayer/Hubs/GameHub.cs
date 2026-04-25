@@ -1357,9 +1357,7 @@ public class GameHub : Hub
         if (amount == 0)
             throw new HubException("Amount must not be 0");
 
-        var currencyType = CurrencyTypeHelper.Normalize(payload.CurrencyType);
-        if (!CurrencyTypeHelper.IsValid(currencyType))
-            throw new HubException($"Invalid currency type '{payload.CurrencyType}'. Must be one of: cp, sp, ep, gp, pp");
+        var currencyType = payload.CurrencyType.ToWire();
 
         var targetPlayer = session.Players.FirstOrDefault(p => p.UserId == payload.TargetUserId)
             ?? throw new HubException("Target player not found in session");
@@ -1387,8 +1385,7 @@ public class GameHub : Hub
             TargetUserName = targetPlayer.UserName ?? "Inconnu",
             CharacterId = characterId,
             Amount = amount,
-            CurrencyType = currencyType,
-            GoldDelta = currencyType == "gp" ? amount : 0,
+            CurrencyType = payload.CurrencyType,
             CopperPieces = wallet.CopperPieces,
             SilverPieces = wallet.SilverPieces,
             ElectrumPieces = wallet.ElectrumPieces,
@@ -1401,7 +1398,7 @@ public class GameHub : Hub
         {
             TargetUserId = payload.TargetUserId,
             TargetCharacterName = GetTargetCharacterName(session, targetPlayer),
-            CurrencyType = currencyType,
+            CurrencyType = payload.CurrencyType,
             Amount = amount,
         };
 

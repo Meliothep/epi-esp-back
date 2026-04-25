@@ -90,74 +90,73 @@ public class DmSpawnUnitPayload
 /// <summary>
 /// DM awards raw XP to a player character.
 /// </summary>
-public class DmAwardExperiencePayload
+public record DmAwardExperiencePayload
 {
-    public Guid TargetUserId { get; set; }
-    public int ExperienceAmount { get; set; }
+    public Guid TargetUserId { get; init; }
+    public int ExperienceAmount { get; init; }
 }
 
 /// <summary>
 /// DM forcibly triggers one or more level-ups for a player character.
 /// </summary>
-public class DmForceLevelUpPayload
+public record DmForceLevelUpPayload
 {
-    public Guid TargetUserId { get; set; }
-    public int Levels { get; set; } = 1;
+    public Guid TargetUserId { get; init; }
+    public int Levels { get; init; } = 1;
 }
 
 /// <summary>
 /// DM grants (or removes) gold from a player character wallet.
 /// </summary>
-public class DmGrantGoldPayload
+public record DmGrantGoldPayload
 {
-    public Guid TargetUserId { get; set; }
-    public int Amount { get; set; }
-    public string CurrencyType { get; set; } = "gp";
+    public Guid TargetUserId { get; init; }
+    public int Amount { get; init; }
+    public CurrencyType CurrencyType { get; init; } = CurrencyType.Gp;
 }
 
 /// <summary>
 /// Broadcast when DM-driven XP / level-up progression is applied.
 /// </summary>
-public class CharacterProgressedPayload
+public record CharacterProgressedPayload
 {
-    public Guid TargetUserId { get; set; }
-    public string TargetUserName { get; set; } = string.Empty;
-    public Guid CharacterId { get; set; }
-    public int AwardedExperience { get; set; }
-    public int ExperienceRemainder { get; set; }
-    public int PreviousLevel { get; set; }
-    public int NewLevel { get; set; }
-    public int LevelUps { get; set; }
-    public int CurrentHitPoints { get; set; }
-    public int MaxHitPoints { get; set; }
-    public int ArmorClass { get; set; }
-    public int Initiative { get; set; }
-    public int Speed { get; set; }
-    public int Strength { get; set; }
-    public int Dexterity { get; set; }
-    public int Constitution { get; set; }
-    public int Intelligence { get; set; }
-    public int Wisdom { get; set; }
-    public int Charisma { get; set; }
-    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    public Guid TargetUserId { get; init; }
+    public string TargetUserName { get; init; } = string.Empty;
+    public Guid CharacterId { get; init; }
+    public int AwardedExperience { get; init; }
+    public int ExperienceRemainder { get; init; }
+    public int PreviousLevel { get; init; }
+    public int NewLevel { get; init; }
+    public int LevelUps { get; init; }
+    public int CurrentHitPoints { get; init; }
+    public int MaxHitPoints { get; init; }
+    public int ArmorClass { get; init; }
+    public int Initiative { get; init; }
+    public int Speed { get; init; }
+    public int Strength { get; init; }
+    public int Dexterity { get; init; }
+    public int Constitution { get; init; }
+    public int Intelligence { get; init; }
+    public int Wisdom { get; init; }
+    public int Charisma { get; init; }
+    public DateTime Timestamp { get; init; } = DateTime.UtcNow;
 }
 
 /// <summary>
 /// Broadcast when DM grants/removes gold.
 /// </summary>
-public class GoldGrantedPayload
+public record GoldGrantedPayload
 {
-    public Guid TargetUserId { get; set; }
-    public string TargetUserName { get; set; } = string.Empty;
-    public Guid CharacterId { get; set; }
-    public int Amount { get; set; }
-    public string CurrencyType { get; set; } = "gp";
-    public int GoldDelta { get; set; }
-    public int CopperPieces { get; set; }
-    public int SilverPieces { get; set; }
-    public int ElectrumPieces { get; set; }
-    public int GoldPieces { get; set; }
-    public int PlatinumPieces { get; set; }
-    public int TotalInCopper { get; set; }
-    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    public Guid TargetUserId { get; init; }
+    public string TargetUserName { get; init; } = string.Empty;
+    public Guid CharacterId { get; init; }
+    public int Amount { get; init; }
+    public CurrencyType CurrencyType { get; init; } = CurrencyType.Gp;
+    public int CopperPieces { get; init; }
+    public int SilverPieces { get; init; }
+    public int ElectrumPieces { get; init; }
+    public int GoldPieces { get; init; }
+    public int PlatinumPieces { get; init; }
+    public int TotalInCopper { get; init; }
+    public DateTime Timestamp { get; init; } = DateTime.UtcNow;
 }
