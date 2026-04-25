@@ -321,7 +321,10 @@ public class GameHub : Hub
                     {
                         var disconnectCancelPayload = new RollCanceledPayload(requestId, pending.Label, pending.PendingUserIds.ToList());
                         var disconnectCancelMessage = _messageSequencer.CreateMessage(sessionId, "RollCanceled", disconnectCancelPayload);
-                        await Clients.Group(sessionId).SendAsync("RollCanceled", disconnectCancelMessage);
+                        // OthersInGroup excludes the disconnecting DM's still-attached connection
+                        // so a grace-period reconnect doesn't see stale "canceled" entries for
+                        // requests the server has already removed.
+                        await Clients.OthersInGroup(sessionId).SendAsync("RollCanceled", disconnectCancelMessage);
                     }
                 }
             }
