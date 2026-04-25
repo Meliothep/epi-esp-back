@@ -804,6 +804,13 @@ public class GameHub : Hub
         };
     }
 
+    private static string GetTargetCharacterName(GameSession session, SessionPlayer targetPlayer)
+    {
+        return session.Combat.Units.Values.FirstOrDefault(unit => unit.OwnerUserId == targetPlayer.UserId)?.Name
+            ?? targetPlayer.UserName
+            ?? "Inconnu";
+    }
+
     #region [== DM Tools ==]
 
     /// <summary>
@@ -1192,14 +1199,35 @@ public class GameHub : Hub
             Charisma = result.Charisma,
             Timestamp = DateTime.UtcNow,
         };
+        var publicProgressed = new CharacterProgressedPublicPayload
+        {
+            TargetUserId = payload.TargetUserId,
+            TargetCharacterName = GetTargetCharacterName(session, targetPlayer),
+            NewLevel = result.NewLevel,
+            LevelUps = result.LevelUps,
+        };
 
         _logger.LogInformation(
             "DM {UserId} awarded {Xp} XP to {TargetUserId} in session {SessionId} ({Prev}->{New}, +{LevelUps} lvl)",
             GetUserId(), payload.ExperienceAmount, payload.TargetUserId, sessionId,
             result.PreviousLevel, result.NewLevel, result.LevelUps);
 
-        var message = _messageSequencer.CreateMessage(sessionId, "CharacterProgressed", progressed);
-        await Clients.Group(sessionId).SendAsync("CharacterProgressed", message);
+        var dmAckMessage = _messageSequencer.CreateMessage(sessionId, "CharacterProgressedDmAck", progressed);
+        await Clients.Caller.SendAsync("CharacterProgressedDmAck", dmAckMessage);
+
+        if (!string.IsNullOrEmpty(targetPlayer.ConnectionId))
+        {
+            var targetMessage = _messageSequencer.CreateMessage(sessionId, "CharacterProgressed", progressed);
+            await Clients.Client(targetPlayer.ConnectionId).SendAsync("CharacterProgressed", targetMessage);
+        }
+
+        // reduced payload — privacy: hide HP/abilities/XP from non-target
+        var excludedConnectionIds = new[] { Context.ConnectionId, targetPlayer.ConnectionId }
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Select(id => id!)
+            .ToArray();
+        var publicMessage = _messageSequencer.CreateMessage(sessionId, "CharacterProgressedPublic", publicProgressed);
+        await Clients.GroupExcept(sessionId, excludedConnectionIds).SendAsync("CharacterProgressedPublic", publicMessage);
     }
 
     /// <summary>
@@ -1277,14 +1305,35 @@ public class GameHub : Hub
             Charisma = result.Charisma,
             Timestamp = DateTime.UtcNow,
         };
+        var publicProgressed = new CharacterProgressedPublicPayload
+        {
+            TargetUserId = payload.TargetUserId,
+            TargetCharacterName = GetTargetCharacterName(session, targetPlayer),
+            NewLevel = result.NewLevel,
+            LevelUps = result.LevelUps,
+        };
 
         _logger.LogInformation(
             "DM {UserId} forced {Levels} level-up(s) for {TargetUserId} in session {SessionId} ({Prev}->{New})",
             GetUserId(), payload.Levels, payload.TargetUserId, sessionId,
             result.PreviousLevel, result.NewLevel);
 
-        var message = _messageSequencer.CreateMessage(sessionId, "CharacterProgressed", progressed);
-        await Clients.Group(sessionId).SendAsync("CharacterProgressed", message);
+        var dmAckMessage = _messageSequencer.CreateMessage(sessionId, "CharacterProgressedDmAck", progressed);
+        await Clients.Caller.SendAsync("CharacterProgressedDmAck", dmAckMessage);
+
+        if (!string.IsNullOrEmpty(targetPlayer.ConnectionId))
+        {
+            var targetMessage = _messageSequencer.CreateMessage(sessionId, "CharacterProgressed", progressed);
+            await Clients.Client(targetPlayer.ConnectionId).SendAsync("CharacterProgressed", targetMessage);
+        }
+
+        // reduced payload — privacy: hide HP/abilities/XP from non-target
+        var excludedConnectionIds = new[] { Context.ConnectionId, targetPlayer.ConnectionId }
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Select(id => id!)
+            .ToArray();
+        var publicMessage = _messageSequencer.CreateMessage(sessionId, "CharacterProgressedPublic", publicProgressed);
+        await Clients.GroupExcept(sessionId, excludedConnectionIds).SendAsync("CharacterProgressedPublic", publicMessage);
     }
 
     /// <summary>
@@ -1348,14 +1397,34 @@ public class GameHub : Hub
             TotalInCopper = wallet.TotalInCopper,
             Timestamp = DateTime.UtcNow,
         };
+        var publicGoldGranted = new GoldGrantedPublicPayload
+        {
+            TargetUserId = payload.TargetUserId,
+            TargetCharacterName = GetTargetCharacterName(session, targetPlayer),
+            CurrencyType = currencyType,
+            Amount = amount,
+        };
 
         _logger.LogInformation(
             "DM {UserId} adjusted currency by {Amount} {Currency} for {TargetUserId} in session {SessionId} (CP {CP}, SP {SP}, EP {EP}, GP {GP}, PP {PP})",
             GetUserId(), amount, currencyType, payload.TargetUserId, sessionId,
             wallet.CopperPieces, wallet.SilverPieces, wallet.ElectrumPieces, wallet.GoldPieces, wallet.PlatinumPieces);
 
-        var message = _messageSequencer.CreateMessage(sessionId, "GoldGranted", goldGranted);
-        await Clients.Group(sessionId).SendAsync("GoldGranted", message);
+        var dmAckMessage = _messageSequencer.CreateMessage(sessionId, "GoldGrantedDmAck", goldGranted);
+        await Clients.Caller.SendAsync("GoldGrantedDmAck", dmAckMessage);
+
+        if (!string.IsNullOrEmpty(targetPlayer.ConnectionId))
+        {
+            var targetMessage = _messageSequencer.CreateMessage(sessionId, "GoldGranted", goldGranted);
+            await Clients.Client(targetPlayer.ConnectionId).SendAsync("GoldGranted", targetMessage);
+        }
+
+        var excludedConnectionIds = new[] { Context.ConnectionId, targetPlayer.ConnectionId }
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Select(id => id!)
+            .ToArray();
+        var publicMessage = _messageSequencer.CreateMessage(sessionId, "GoldGrantedPublic", publicGoldGranted);
+        await Clients.GroupExcept(sessionId, excludedConnectionIds).SendAsync("GoldGrantedPublic", publicMessage);
     }
 
     /// <summary>
