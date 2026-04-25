@@ -1350,6 +1350,10 @@ public class GameHub : Hub
         if (!session.PendingRolls.TryAdd(requestId, pending))
             throw new HubException("Roll request id collision — retry");
 
+        _logger.LogInformation(
+            "DmRequestRoll: session={SessionId}, requestId={RequestId}, label={Label}, dice={DiceType}, targetCount={TargetCount}, openPending={OpenPending}",
+            sessionId, requestId, payload.Label ?? "(none)", "d20", targets.Count, session.PendingRolls.Count);
+
         // Per-target send via ConnectionId — DiscordUserIdProvider keys SignalR
         // user routes by Discord snowflake, but session.Players[].UserId is the
         // MD5-derived Guid, so Clients.User(uidGuid) would never match.
