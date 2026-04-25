@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using static Multiplayer.Define;
 
@@ -30,5 +32,12 @@ namespace Multiplayer.Models
         /// the <see cref="Services.CombatManager"/> is the only writer.
         /// </summary>
         public CombatState Combat { get; set; } = new();
+
+        /// <summary>
+        /// In-flight roll requests keyed by request ID. Never serialized to wire format.
+        /// </summary>
+        [JsonIgnore]
+        public ConcurrentDictionary<Guid, PendingRollRequest> PendingRolls { get; }
+            = new();
     }
 }
