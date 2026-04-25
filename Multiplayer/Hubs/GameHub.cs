@@ -312,6 +312,30 @@ public class GameHub : Hub
     }
 
     /// <summary>
+    /// Diffuse le vote d'un joueur pour un choix sur un bloc Choices.
+    /// Tous les abonnés du groupe campagne reçoivent l'événement "ChoiceVoted".
+    /// </summary>
+    /// <param name="campaignId">Identifiant de la campagne.</param>
+    /// <param name="nodeId">Identifiant du nœud Choices en cours.</param>
+    /// <param name="choiceIndex">Index du choix (0-based). -1 = vote annulé.</param>
+    public async Task VoteForChoice(Guid campaignId, string nodeId, int choiceIndex)
+    {
+        var userId   = GetUserId();
+        var userName = GetUserName();
+
+        await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("ChoiceVoted", new
+        {
+            userId   = userId.ToString(),
+            userName,
+            nodeId,
+            choiceIndex,
+        });
+
+        _logger.LogDebug("User {UserName} voted choice {ChoiceIndex} on node {NodeId} in campaign {CampaignId}",
+            userName, choiceIndex, nodeId, campaignId);
+    }
+
+    /// <summary>
     /// S'abonner aux notifications "activité Discord" (participants connectés au même salon vocal).
     /// </summary>
     public async Task SubscribeActivity(string guildId, string voiceChannelId)
@@ -329,6 +353,31 @@ public class GameHub : Hub
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, GetActivityGroup(guildId, voiceChannelId));
         _logger.LogDebug("Connection {ConnectionId} unsubscribed from activity {GuildId}/{VoiceChannelId}",
             Context.ConnectionId, guildId, voiceChannelId);
+    }
+
+    /// <summary>
+    /// Rejoindre la session active d'une campagne.
+    /// Cherche dans les sessions in-memory par campaignId — évite le problème
+    /// d'utiliser un UUID de base de données (listSessions REST) qui ne correspond
+    /// pas à l'ID SignalR in-memory (format "session_GUID").
+    /// </summary>
+    public async Task<JoinResult> JoinCampaignSession(Guid campaignId)
+    {
+        var userId   = GetUserId();
+        var userName = GetUserName();
+
+        // Find the most-recently-active live session for this campaign.
+        var session = _sessionManager
+            .GetSessionsByCampaign(campaignId)
+            .Where(s => s.State != SessionState.Ended)
+            .OrderByDescending(s => s.LastActivityAt)
+            .FirstOrDefault();
+
+        if (session == null)
+            return JoinResult.Fail("Aucune session active trouvée pour cette campagne.");
+
+        // Delegate to the regular JoinSession logic using the real in-memory sessionId.
+        return await JoinSession(session.SessionId);
     }
 
     /// <summary>

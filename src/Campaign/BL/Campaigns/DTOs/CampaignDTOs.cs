@@ -154,7 +154,12 @@ public enum CampaignRoleFilter
     /// <summary>
     /// Campaigns where user is a player.
     /// </summary>
-    AsPlayer = 2
+    AsPlayer = 2,
+
+    /// <summary>
+    /// Campaigns where user is a member (DM or player) — excludes public campaigns the user hasn't joined.
+    /// </summary>
+    AsMember = 3
 }
 
 /// <summary>

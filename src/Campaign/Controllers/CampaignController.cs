@@ -276,8 +276,57 @@ public class CampaignController : ControllerBase
         }
     }
     
+    /// <summary>
+    /// Joins a public campaign directly by its ID (no invite code required).
+    /// </summary>
+    [HttpPost("{id:guid}/join-public")]
+    [ProducesResponseType(typeof(CampaignDetailResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> JoinPublicCampaign(
+        [FromRoute] Guid id,
+        CancellationToken ct)
+    {
+        try
+        {
+            var userId   = _userContextService.GetCurrentUserId();
+            var campaign = await _campaignService.JoinPublicCampaignAsync(id, userId, ct);
+
+            if (campaign == null)
+            {
+                return NotFound(new ProblemDetails
+                {
+                    Title  = "Campaign Not Found",
+                    Detail = $"Campaign {id} not found",
+                    Status = StatusCodes.Status404NotFound
+                });
+            }
+
+            return Ok(campaign);
+        }
+        catch (CampaignException ex)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title  = "Join Failed",
+                Detail = ex.Message,
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error while joining public campaign {CampaignId}", id);
+            return StatusCode(StatusCodes.Status500InternalServerError, new ProblemDetails
+            {
+                Title  = "Internal Server Error",
+                Detail = "Une erreur inattendue s'est produite.",
+                Status = StatusCodes.Status500InternalServerError
+            });
+        }
+    }
+
     #endregion
-    
+
     #region Campaign Tree
 
     /// <summary>
