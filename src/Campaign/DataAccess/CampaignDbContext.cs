@@ -270,6 +270,15 @@ public class CampaignDbContext : DbContext
             entity.Property(e => e.DiceType).IsRequired().HasMaxLength(20);
             entity.Property(e => e.Label).HasMaxLength(200);
 
+            // Cascade delete with the parent Campaign so journal rows don't
+            // outlive the campaign they belong to. No inverse navigation on
+            // Campaign — keeps the entity flat (rolls are append-only history,
+            // not a normally-loaded child collection).
+            entity.HasOne<Models.Campaign>()
+                  .WithMany()
+                  .HasForeignKey(e => e.CampaignId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
             // Journal queries: list a campaign's rolls newest-first. PG defaults
             // index sort order to ASC; range scans on RolledAt with ORDER BY DESC
             // still use the index efficiently for POC scope.
