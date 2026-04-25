@@ -293,9 +293,7 @@ public class GameHub : Hub
         if (sessionId != null)
         {
             // Capture the session (and whether the disconnecting user is the DM)
-            // BEFORE MarkPlayerDisconnected mutates state. The session object itself
-            // is retained by SessionManager for the reconnect grace period, so it
-            // remains valid for the pending-roll fanout below.
+            // BEFORE MarkPlayerDisconnected mutates state.
             var session = _sessionManager.GetSession(sessionId);
             var isDmDisconnecting = session != null && session.DmUserId == userId;
 

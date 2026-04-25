@@ -6,14 +6,14 @@ public record DmRollRequestPayload(
     List<Guid> TargetUserIds,
     string? Label);
 
-/// <summary>Outbound to each target via Clients.User. Carries that target's forced value only.</summary>
+/// <summary>Outbound to each target via Clients.Client(connectionId). Carries that target's forced value only.</summary>
 public record RollRequestedPayload(
     Guid RequestId,
     string DiceType,
     string? Label,
     int ForcedValue);
 
-/// <summary>Outbound to DM only via Clients.User. No values — DM gets progress via RollResultBroadcast.</summary>
+/// <summary>Outbound to DM only via Clients.Caller. No values — DM gets progress via RollResultBroadcast.</summary>
 public record RollRequestedDmEchoPayload(
     Guid RequestId,
     string DiceType,
