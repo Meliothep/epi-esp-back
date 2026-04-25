@@ -116,4 +116,29 @@ public class PendingRollRequestTests
         Assert.Equal(1, successes);
         Assert.Equal(1, results.Count(r => r.ok && r.complete));
     }
+
+    [Fact]
+    public async Task TrySubmit_TwoUsersRaceForLastTwoSlots_BothSucceedAndExactlyOneSeesComplete()
+    {
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var req = Make((a, 5), (b, 12));
+
+        // 16 tasks alternating between users a and b. Each user can only succeed
+        // once due to the Remove-from-set guard, so we expect exactly 2 successes
+        // total and exactly 1 carrying complete=true.
+        var results = await Task.WhenAll(
+            Enumerable.Range(0, 16).Select(i => Task.Run(() =>
+            {
+                var uid = i % 2 == 0 ? a : b;
+                var ok = req.TrySubmit(uid, out var v, out var c);
+                return (ok, complete: c, value: v);
+            })));
+
+        var successes = results.Where(r => r.ok).ToList();
+        Assert.Equal(2, successes.Count);
+        Assert.Equal(1, successes.Count(r => r.complete));
+        Assert.Contains(req.SubmittedValues, kv => kv.Key == a && kv.Value == 5);
+        Assert.Contains(req.SubmittedValues, kv => kv.Key == b && kv.Value == 12);
+    }
 }
