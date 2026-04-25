@@ -19,13 +19,17 @@ public class StateManager
 
     public void SetSnapshot(string sessionId, GameStateSnapshot snapshot)
     {
-        if (string.IsNullOrWhiteSpace(sessionId)) return;
+        // Blank sessionId is a programmer error — silently ignoring it would
+        // make the caller believe the snapshot was stored while it wasn't.
+        if (string.IsNullOrWhiteSpace(sessionId))
+            throw new ArgumentException("sessionId must not be null or whitespace", nameof(sessionId));
         _snapshots[sessionId] = snapshot;
     }
 
     public void ClearSnapshot(string sessionId)
     {
-        if (string.IsNullOrWhiteSpace(sessionId)) return;
+        if (string.IsNullOrWhiteSpace(sessionId))
+            throw new ArgumentException("sessionId must not be null or whitespace", nameof(sessionId));
         _snapshots.TryRemove(sessionId, out _);
     }
 }

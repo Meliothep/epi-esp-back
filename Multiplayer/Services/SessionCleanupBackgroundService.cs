@@ -25,10 +25,15 @@ public class SessionCleanupBackgroundService : BackgroundService
         _logger = logger;
     }
 
+    // Alert after this many back-to-back failures so ops knows cleanup has stalled.
+    private const int ConsecutiveFailureAlertThreshold = 3;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Session cleanup background service started (interval: {Interval}, DM timeout: {DmTimeout}, inactivity: {Inactivity})",
             RunInterval, DmDisconnectedThreshold, InactivityThreshold);
+
+        var consecutiveFailures = 0;
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -42,6 +47,7 @@ public class SessionCleanupBackgroundService : BackgroundService
                         _stateManager.ClearSnapshot(id);
                     _logger.LogInformation("Session cleanup removed {Count} stale session(s)", removedIds.Count);
                 }
+                consecutiveFailures = 0; // reset on success
             }
             catch (OperationCanceledException)
             {
@@ -49,7 +55,19 @@ public class SessionCleanupBackgroundService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during session cleanup");
+                consecutiveFailures++;
+                if (consecutiveFailures >= ConsecutiveFailureAlertThreshold)
+                {
+                    // Repeated failures mean stale sessions are accumulating.
+                    // Log as Error (not Warning) so monitoring/alerting picks it up.
+                    _logger.LogError(ex,
+                        "Session cleanup has failed {Count} consecutive time(s) — stale sessions may be accumulating",
+                        consecutiveFailures);
+                }
+                else
+                {
+                    _logger.LogError(ex, "Error during session cleanup (consecutive failures: {Count})", consecutiveFailures);
+                }
             }
         }
     }

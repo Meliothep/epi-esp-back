@@ -95,11 +95,21 @@ namespace Multiplayer.Services
                 var next = FindNextAliveIndex(combat);
                 if (next == -1)
                 {
+                    // Re-check outcome before defaulting to Defeat: if both sides
+                    // died simultaneously (mutual kill on the last unit), CheckOutcome
+                    // returns null (no alive player, no alive enemy) and we'd wrongly
+                    // declare Defeat. Use CheckOutcome as the authoritative resolver;
+                    // only fall back to Defeat when it truly can't determine a winner.
+                    var finalOutcome = CheckOutcome(combat) ?? CombatResult.Defeat;
                     combat.Phase = CombatPhase.Resolved;
-                    combat.Outcome = CombatResult.Defeat;
+                    combat.Outcome = finalOutcome;
                     return new TurnAdvanceResult(combat.Phase, combat.Round, null, combat.Outcome);
                 }
 
+                // next <= CurrentUnitIndex means the cursor wrapped around the list,
+                // i.e. a new round started. Edge case: single alive unit has index 0
+                // and next == 0 every time — this correctly increments the round on
+                // each "turn" for a solo unit, which is the intended behaviour.
                 if (next <= combat.CurrentUnitIndex)
                 {
                     combat.Round++;
@@ -234,7 +244,7 @@ namespace Multiplayer.Services
         /// </summary>
         public async Task<AbilityApplyResult?> ApplyAbilityAsync(
             GameSession session, string unitId, string abilityId,
-            List<AbilityEffect> effects, int apCost)
+            IReadOnlyList<AbilityEffect> effects, int apCost)
         {
             await session.Combat.Lock.WaitAsync();
             try
@@ -285,6 +295,12 @@ namespace Multiplayer.Services
         /// <summary>
         /// Forcibly ends combat (e.g. DM-triggered). Transitions back to FreeRoam and clears turn state.
         /// </summary>
+        /// <remarks>
+        /// Intentionally does NOT clear <see cref="CombatState.Units"/>: units remain in the roster
+        /// so their HP / AP / position survive the transition and are still visible in free-roam mode.
+        /// If a fresh unit set is needed (e.g. map switch), the caller must clear units separately
+        /// or route through <see cref="StartCombatAsync"/> which rebuilds the roster from scratch.
+        /// </remarks>
         public async Task EndCombatAsync(GameSession session)
         {
             await session.Combat.Lock.WaitAsync();
@@ -346,5 +362,7 @@ namespace Multiplayer.Services
 
     public record CombatAttackOutcome(string AttackerId, string TargetId, int Damage, int TargetHp, bool TargetAlive, int AttackerApRemaining);
 
-    public record AbilityApplyResult(string UnitId, string AbilityId, int AttackerApRemaining, List<AbilityEffect> Effects);
+    // IReadOnlyList prevents consumers from mutating the resolved effects list
+    // after the record is constructed (a mutable List<> could be modified mid-fanout).
+    public record AbilityApplyResult(string UnitId, string AbilityId, int AttackerApRemaining, IReadOnlyList<AbilityEffect> Effects);
 }

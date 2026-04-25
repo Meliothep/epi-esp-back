@@ -8,9 +8,26 @@ namespace Multiplayer.Models;
 /// Snapshot minimal de l'état de jeu, utilisable pour une resynchronisation
 /// (reconnect / late join). Le contenu peut évoluer, mais doit rester sérialisable.
 /// </summary>
+/// <remarks>
+/// TODO (type design): all properties are mutable — a "snapshot" that can be modified
+/// after construction is a snapshot in name only. Convert to <c>record</c> with
+/// <c>init</c>-only setters and <c>IReadOnlyList&lt;UnitRuntimeState&gt;</c> for Units.
+/// Coordinate with the front before changing serialisation shape.
+/// <para/>
+/// TODO: <see cref="Units"/> and <see cref="Combat"/>.<c>Units</c> are two sources of
+/// truth for the same data. Drop the top-level <see cref="Units"/> or make it a computed
+/// alias for <c>Combat.Units.Values</c>.
+/// </remarks>
 public class GameStateSnapshot
 {
     public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// UTC timestamp at which the snapshot was produced. Clients can compare
+    /// against a locally-cached snapshot to detect whether a received push is
+    /// newer than what they already have (e.g. duplicate FullStateSync on rejoin).
+    /// </summary>
+    public DateTime CapturedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
     /// Liste des unités (positions / HP / AP) au moment du snapshot.
@@ -46,6 +63,7 @@ public class GameStateSnapshot
         return new GameStateSnapshot
         {
             SessionId = session.SessionId,
+            CapturedAt = DateTime.UtcNow,
             Units = unitsCopy,
             Combat = new CombatState
             {
