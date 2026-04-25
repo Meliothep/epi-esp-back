@@ -3,7 +3,7 @@ namespace Multiplayer.Models.Messages;
 /// <summary>Hub inbound from DM. Hub rolls values, then fans out.</summary>
 public record DmRollRequestPayload(
     string DiceType,
-    List<Guid> TargetUserIds,
+    IReadOnlyList<Guid> TargetUserIds,
     string? Label);
 
 /// <summary>Outbound to each target via Clients.Client(connectionId). Carries that target's forced value only.</summary>
@@ -18,7 +18,7 @@ public record RollRequestedDmEchoPayload(
     Guid RequestId,
     string DiceType,
     string? Label,
-    List<Guid> TargetUserIds,
+    IReadOnlyList<Guid> TargetUserIds,
     int ExpectedCount);
 
 /// <summary>Outbound to session group for spectator awareness. No values.</summary>
@@ -26,7 +26,7 @@ public record RollRequestedPublicPayload(
     Guid RequestId,
     string DiceType,
     string? Label,
-    List<Guid> TargetUserIds,
+    IReadOnlyList<Guid> TargetUserIds,
     int ExpectedCount);
 
 /// <summary>Inbound from player. No userId (derived from GetUserId()) and no value (server-owned).</summary>
@@ -46,4 +46,4 @@ public record RollResultBroadcastPayload(
 public record RollCanceledPayload(
     Guid RequestId,
     string? Label,
-    List<Guid> StillPendingUserIds);
+    IReadOnlyList<Guid> StillPendingUserIds);
