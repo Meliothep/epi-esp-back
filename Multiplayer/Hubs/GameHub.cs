@@ -1131,6 +1131,9 @@ public class GameHub : Hub
         if (session.DmUserId != GetUserId())
             throw new HubException("Only the DM can award XP");
 
+        if (payload.TargetUserId == GetUserId())
+            throw new HubException("DM cannot self-grant");
+
         if (payload.ExperienceAmount <= 0)
             throw new HubException("ExperienceAmount must be > 0");
 
@@ -1147,11 +1150,17 @@ public class GameHub : Hub
         }
         catch (ArgumentOutOfRangeException ex) when (ex.ParamName == "experienceAmount")
         {
+            _logger.LogWarning(ex, "DM action validation failed");
             throw new HubException(ex.Message);
         }
-        catch (ArgumentOutOfRangeException)
+        catch (ArgumentOutOfRangeException ex)
         {
+            _logger.LogWarning(ex, "DM action validation failed");
             throw new HubException("Invalid XP award parameters.");
+        }
+        catch (KeyNotFoundException ex)
+        {
+            throw new HubException("Target character not found: " + ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -1207,6 +1216,9 @@ public class GameHub : Hub
         if (session.DmUserId != GetUserId())
             throw new HubException("Only the DM can level up players");
 
+        if (payload.TargetUserId == GetUserId())
+            throw new HubException("DM cannot self-grant");
+
         if (payload.Levels <= 0)
             throw new HubException("Levels must be > 0");
 
@@ -1223,11 +1235,17 @@ public class GameHub : Hub
         }
         catch (ArgumentOutOfRangeException ex) when (ex.ParamName == "levels")
         {
+            _logger.LogWarning(ex, "DM action validation failed");
             throw new HubException(ex.Message);
         }
-        catch (ArgumentOutOfRangeException)
+        catch (ArgumentOutOfRangeException ex)
         {
+            _logger.LogWarning(ex, "DM action validation failed");
             throw new HubException("Invalid level-up parameters.");
+        }
+        catch (KeyNotFoundException ex)
+        {
+            throw new HubException("Target character not found: " + ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -1283,6 +1301,9 @@ public class GameHub : Hub
         if (session.DmUserId != GetUserId())
             throw new HubException("Only the DM can grant gold");
 
+        if (payload.TargetUserId == GetUserId())
+            throw new HubException("DM cannot self-grant");
+
         var amount = payload.Amount;
         if (amount == 0)
             throw new HubException("Amount must not be 0");
@@ -1301,6 +1322,10 @@ public class GameHub : Hub
         try
         {
             wallet = await _characterProgression.AdjustCurrencyAsync(characterId, payload.TargetUserId, currencyType, amount);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            throw new HubException("Target character not found: " + ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
