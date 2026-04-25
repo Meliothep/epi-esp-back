@@ -1317,18 +1317,25 @@ public class GameHub : Hub
         if (session.PendingRolls.Count >= 10)
             throw new HubException("Too many open roll requests (max 10)");
 
+        // Require a live ConnectionId alongside the Connected status so the
+        // per-target SendAsync below can never silently drop a target that is
+        // counted in PendingUserIds — that would leave the request waiting on
+        // a player who never received it. If a target reconnects later, their
+        // RequestRollReplay invocation rehydrates the pending roll for them.
         var targets = payload.TargetUserIds.Count > 0
             ? payload.TargetUserIds
                 .Where(id => id != session.DmUserId && session.Players.Any(p =>
                     p.UserId == id &&
                     p.Role == PlayerRole.Player &&
-                    p.Status == ConnectionStatus.Connected))
+                    p.Status == ConnectionStatus.Connected &&
+                    p.ConnectionId != null))
                 .Distinct()
                 .ToList()
             : session.Players
                 .Where(p => p.UserId != session.DmUserId &&
                             p.Role == PlayerRole.Player &&
-                            p.Status == ConnectionStatus.Connected)
+                            p.Status == ConnectionStatus.Connected &&
+                            p.ConnectionId != null)
                 .Select(p => p.UserId)
                 .Distinct()
                 .ToList();
