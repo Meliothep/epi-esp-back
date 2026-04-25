@@ -1326,16 +1326,23 @@ public class GameHub : Hub
         if (!session.PendingRolls.TryAdd(requestId, pending))
             throw new HubException("Roll request id collision — retry");
 
+        // Per-target send via ConnectionId — DiscordUserIdProvider keys SignalR
+        // user routes by Discord snowflake, but session.Players[].UserId is the
+        // MD5-derived Guid, so Clients.User(uidGuid) would never match.
         foreach (var (uid, val) in values)
         {
+            var targetPlayer = session.Players.FirstOrDefault(p => p.UserId == uid);
+            if (targetPlayer?.ConnectionId == null) continue;
             var rollRequestedPayload = new RollRequestedPayload(requestId, "d20", payload.Label, val);
             var rollRequestedMessage = _messageSequencer.CreateMessage(sessionId, "RollRequested", rollRequestedPayload);
-            await Clients.User(uid.ToString()).SendAsync("RollRequested", rollRequestedMessage);
+            await Clients.Client(targetPlayer.ConnectionId).SendAsync("RollRequested", rollRequestedMessage);
         }
 
         var dmEchoPayload = new RollRequestedDmEchoPayload(requestId, "d20", payload.Label, targets, targets.Count);
         var dmEchoMessage = _messageSequencer.CreateMessage(sessionId, "RollRequestedDmEcho", dmEchoPayload);
-        await Clients.User(session.DmUserId.ToString()).SendAsync("RollRequestedDmEcho", dmEchoMessage);
+        // DM is the caller of this method — Clients.Caller is the cleanest target
+        // and avoids the same UserId Guid vs snowflake mismatch.
+        await Clients.Caller.SendAsync("RollRequestedDmEcho", dmEchoMessage);
 
         var publicPayload = new RollRequestedPublicPayload(requestId, "d20", payload.Label, targets, targets.Count);
         var publicMessage = _messageSequencer.CreateMessage(sessionId, "RollRequestedPublic", publicPayload);
