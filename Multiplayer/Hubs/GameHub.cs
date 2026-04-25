@@ -1167,10 +1167,12 @@ public class GameHub : Hub
         }
         catch (KeyNotFoundException ex)
         {
+            _logger.LogWarning(ex, "DM XP grant target not found (session {SessionId}, target {TargetUserId})", sessionId, payload.TargetUserId);
             throw new HubException("Target character not found: " + ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
+            _logger.LogWarning(ex, "DM XP grant ownership mismatch (session {SessionId}, target {TargetUserId})", sessionId, payload.TargetUserId);
             throw new HubException("Character ownership mismatch: " + ex.Message);
         }
 
@@ -1273,10 +1275,12 @@ public class GameHub : Hub
         }
         catch (KeyNotFoundException ex)
         {
+            _logger.LogWarning(ex, "DM force-levelup target not found (session {SessionId}, target {TargetUserId})", sessionId, payload.TargetUserId);
             throw new HubException("Target character not found: " + ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
+            _logger.LogWarning(ex, "DM force-levelup ownership mismatch (session {SessionId}, target {TargetUserId})", sessionId, payload.TargetUserId);
             throw new HubException("Character ownership mismatch: " + ex.Message);
         }
 
@@ -1372,10 +1376,12 @@ public class GameHub : Hub
         }
         catch (KeyNotFoundException ex)
         {
+            _logger.LogWarning(ex, "DM gold grant target not found (session {SessionId}, target {TargetUserId})", sessionId, payload.TargetUserId);
             throw new HubException("Target character not found: " + ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
+            _logger.LogWarning(ex, "DM gold grant ownership mismatch (session {SessionId}, target {TargetUserId})", sessionId, payload.TargetUserId);
             throw new HubException("Character ownership mismatch: " + ex.Message);
         }
 
