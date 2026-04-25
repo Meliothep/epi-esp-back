@@ -23,6 +23,21 @@ public class PendingRollRequestTests
     }
 
     [Fact]
+    public void Constructor_PendingIdMissingFromRollValues_Throws()
+    {
+        var a = Guid.NewGuid();
+        var ghost = Guid.NewGuid();
+        Assert.Throws<ArgumentException>(() => new PendingRollRequest
+        {
+            RequestId = Guid.NewGuid(),
+            DiceType = "d20",
+            Label = null,
+            RollValues = new Dictionary<Guid, int> { [a] = 7 },
+            PendingUserIds = new HashSet<Guid> { a, ghost },
+        });
+    }
+
+    [Fact]
     public void TrySubmit_ValidTarget_ReturnsValueAndUpdatesPending()
     {
         var a = Guid.NewGuid();

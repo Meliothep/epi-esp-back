@@ -19,7 +19,14 @@ public class PendingRollRequest
         init
         {
             _pendingUserIds.Clear();
-            foreach (var id in value) _pendingUserIds.Add(id);
+            foreach (var id in value)
+            {
+                if (!RollValues.ContainsKey(id))
+                    throw new ArgumentException(
+                        $"PendingUserIds contained {id} which is not present in RollValues",
+                        nameof(value));
+                _pendingUserIds.Add(id);
+            }
         }
     }
 
