@@ -15,8 +15,5 @@ namespace DnDiscordAPI.Games.Character.Models
 
         public static bool IsPlayable(this CharacterClass characterClass)
             => PlayableClasses.Contains(characterClass);
-
-        public static IReadOnlyCollection<CharacterClass> GetPlayable()
-            => PlayableClasses;
     }
 }
