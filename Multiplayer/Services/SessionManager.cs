@@ -511,19 +511,31 @@ public class SessionManager
     /// </summary>
     /// <param name="dmDisconnectedThreshold">e.g. 5 minutes - session supprimée si le DM est toujours déconnecté.</param>
     /// <param name="inactivityThreshold">e.g. 10 minutes - session supprimée si aucune activité.</param>
-    /// <returns>Nombre de sessions supprimées.</returns>
-    public int CleanupStaleSessionsByPolicy(TimeSpan dmDisconnectedThreshold, TimeSpan inactivityThreshold)
+    /// <returns>IDs des sessions supprimées (pour nettoyage des stores dépendants).</returns>
+    public IReadOnlyList<string> CleanupStaleSessionsByPolicy(TimeSpan dmDisconnectedThreshold, TimeSpan inactivityThreshold)
     {
         var now = DateTime.UtcNow;
         var toRemove = _sessions.Values
             .Where(s =>
+            {
                 // Never evict a session while any player is currently connected —
                 // the LastActivityAt heuristic isn't enough when combat commands
                 // don't always touch it. An active websocket is the authoritative
                 // "still alive" signal.
-                s.Players.All(p => p.Status != Define.ConnectionStatus.Connected) &&
-                ((s.DmDisconnectedAt.HasValue && (now - s.DmDisconnectedAt.Value) >= dmDisconnectedThreshold) ||
-                 (s.LastActivityAt < now - inactivityThreshold)))
+                //
+                // Players is a List<SessionPlayer> mutated by JoinSession / LeaveSession
+                // on other threads. Snapshot it with ToList() so the LINQ predicate
+                // runs on a stable copy and can't throw InvalidOperationException
+                // ("Collection was modified") mid-iteration — which the background
+                // service catch would swallow, accumulating stale sessions forever.
+                List<SessionPlayer> players;
+                try { players = s.Players.ToList(); }
+                catch (InvalidOperationException) { return false; } // mutated, skip this tick
+
+                return players.All(p => p.Status != Define.ConnectionStatus.Connected) &&
+                       ((s.DmDisconnectedAt.HasValue && (now - s.DmDisconnectedAt.Value) >= dmDisconnectedThreshold) ||
+                        (s.LastActivityAt < now - inactivityThreshold));
+            })
             .ToList();
 
         foreach (var session in toRemove)
@@ -539,6 +551,6 @@ public class SessionManager
                 session.SessionId, session.DmDisconnectedAt, session.LastActivityAt);
         }
 
-        return toRemove.Count;
+        return toRemove.Select(s => s.SessionId).ToList();
     }
 }
