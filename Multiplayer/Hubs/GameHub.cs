@@ -1145,11 +1145,13 @@ public class GameHub : Hub
         {
             result = await _characterProgression.AwardExperienceAsync(characterId, payload.ExperienceAmount);
         }
-        catch (ArgumentOutOfRangeException ex)
+        catch (ArgumentOutOfRangeException ex) when (ex.ParamName == "experienceAmount")
         {
-            throw new HubException(ex.ParamName == nameof(payload.ExperienceAmount)
-                ? ex.Message
-                : "Invalid XP award parameters.");
+            throw new HubException(ex.Message);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw new HubException("Invalid XP award parameters.");
         }
 
         await SyncCharacterHpToActiveUnitAsync(session, payload.TargetUserId, result.CurrentHitPoints, result.MaxHitPoints);
@@ -1215,11 +1217,13 @@ public class GameHub : Hub
         {
             result = await _characterProgression.ForceLevelUpAsync(characterId, payload.Levels);
         }
-        catch (ArgumentOutOfRangeException ex)
+        catch (ArgumentOutOfRangeException ex) when (ex.ParamName == "levels")
         {
-            throw new HubException(ex.ParamName == nameof(payload.Levels)
-                ? ex.Message
-                : "Invalid level-up parameters.");
+            throw new HubException(ex.Message);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw new HubException("Invalid level-up parameters.");
         }
 
         await SyncCharacterHpToActiveUnitAsync(session, payload.TargetUserId, result.CurrentHitPoints, result.MaxHitPoints);
@@ -1275,8 +1279,8 @@ public class GameHub : Hub
         if (amount == 0)
             throw new HubException("Amount must not be 0");
 
-        var currencyType = (payload.CurrencyType ?? "gp").Trim().ToLowerInvariant();
-        if (!new[] { "cp", "sp", "ep", "gp", "pp" }.Contains(currencyType))
+        var currencyType = CurrencyTypeHelper.Normalize(payload.CurrencyType);
+        if (!CurrencyTypeHelper.IsValid(currencyType))
             throw new HubException($"Invalid currency type '{payload.CurrencyType}'. Must be one of: cp, sp, ep, gp, pp");
 
         var targetPlayer = session.Players.FirstOrDefault(p => p.UserId == payload.TargetUserId)

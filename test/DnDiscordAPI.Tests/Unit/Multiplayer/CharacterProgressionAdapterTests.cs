@@ -159,8 +159,12 @@ public class CharacterProgressionAdapterTests
         var (adapter, _, db) = MakeAdapter(level: 1, xp: 0);
         var character = db.Characters.First();
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+        var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             () => adapter.AwardExperienceAsync(character.Id, 30_000));
+
+        // ParamName must stay "experienceAmount" — GameHub.DmAwardExperience filters on this
+        // exact string in its `catch (ArgumentOutOfRangeException ex) when (...)` clause.
+        Assert.Equal("experienceAmount", ex.ParamName);
 
         // Character XP must be unchanged — no partial commit.
         var reloaded = await db.Characters.FindAsync(character.Id);
@@ -201,8 +205,11 @@ public class CharacterProgressionAdapterTests
         var (adapter, _, db) = MakeAdapter();
         var character = db.Characters.First();
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+        var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             () => adapter.ForceLevelUpAsync(character.Id, 26));
+
+        // ParamName must stay "levels" — GameHub.DmForceLevelUp filters on this exact string.
+        Assert.Equal("levels", ex.ParamName);
     }
 
     // ── AdjustCurrency – currency type mapping ───────────────────────────────
