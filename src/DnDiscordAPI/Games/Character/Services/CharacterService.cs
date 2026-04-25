@@ -182,7 +182,9 @@ namespace DnDiscordAPI.Games.Character.Services
             character.CurrentHitPoints = Math.Clamp(character.CurrentHitPoints + hpIncrease, 0, character.MaxHitPoints);
 
             // Keep derived combat stats in sync with updated abilities.
+            // AC unarmored only — extend when armor system lands
             character.ArmorClass = 10 + character.Abilities.GetModifier(character.Abilities.Dexterity);
+            // Init baseline — extend with feats / Bard JoaT when added
             character.Initiative = character.Abilities.GetModifier(character.Abilities.Dexterity);
 
             character.UpdatedAt = DateTime.UtcNow;
@@ -219,9 +221,10 @@ namespace DnDiscordAPI.Games.Character.Services
 
         private static void ApplyAbilityScoreIncrease(Models.Character character, ILogger<CharacterService> logger)
         {
-            // D&D-like ASI cadence.
-            if (character.Level % 4 != 0) return;
+            var expectedAsiCount = character.Level / 4;
+            if (character.AsiAppliedCount >= expectedAsiCount) return;
 
+            var bumped = true;
             switch (character.Class)
             {
                 case Models.CharacterClass.Barbare:
@@ -257,8 +260,11 @@ namespace DnDiscordAPI.Games.Character.Services
 
                 default:
                     logger.LogWarning("No ASI configured for character class {Class}. If a new class was added to the enum, update ApplyAbilityScoreIncrease.", character.Class);
+                    bumped = false;
                     break;
             }
+
+            if (bumped) character.AsiAppliedCount++;
         }
 
         private int RollHitDie(string characterClass)
