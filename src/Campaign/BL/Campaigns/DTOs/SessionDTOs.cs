@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using DnDiscord.Campaign.DataAccess.Models;
 
 namespace DnDiscord.Campaign.BL.Campaigns.DTOs;
@@ -45,6 +46,7 @@ public class GameSessionResponse
 {
     public Guid Id { get; set; }
     public Guid CampaignId { get; set; }
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public GameSessionStatus Status { get; set; }
     public string? CurrentNodeId { get; set; }
     public Guid StartedBy { get; set; }

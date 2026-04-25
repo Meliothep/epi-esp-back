@@ -433,8 +433,18 @@ public class SessionManager
     {
         if (_sessions.TryGetValue(sessionId, out var session))
         {
+            var oldMapId = session.MapId;
             session.MapId = mapId;
             session.LastActivityAt = DateTime.UtcNow;
+            _logger.LogInformation(
+                "Session {SessionId} map changed: {OldMapId} -> {NewMapId}",
+                sessionId, oldMapId ?? "(null)", mapId);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "SetSessionMapId({SessionId}, {NewMapId}) — session not found",
+                sessionId, mapId);
         }
     }
 

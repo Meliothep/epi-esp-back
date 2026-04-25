@@ -43,6 +43,12 @@ public class CampaignDbContext : DbContext
     /// </summary>
     public DbSet<CampaignMap> Maps => Set<CampaignMap>();
 
+    /// <summary>
+    /// Successful dice roll submissions persisted from <c>GameHub.SubmitRollResult</c>
+    /// for the campaign journal.
+    /// </summary>
+    public DbSet<RollHistoryEntry> RollHistory => Set<RollHistoryEntry>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -53,6 +59,7 @@ public class CampaignDbContext : DbContext
         ConfigureCampaignGameSession(modelBuilder);
         ConfigureSessionHistoryEntry(modelBuilder);
         ConfigureCampaignMap(modelBuilder);
+        ConfigureRollHistoryEntry(modelBuilder);
     }
 
     private static void ConfigureCampaignMap(ModelBuilder modelBuilder)
@@ -244,6 +251,43 @@ public class CampaignDbContext : DbContext
             entity.HasIndex(s => s.StartedBy);
             entity.HasIndex(s => s.Status);
             entity.HasIndex(s => s.StartedAt);
+        });
+    }
+
+    private static void ConfigureRollHistoryEntry(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<RollHistoryEntry>(entity =>
+        {
+            entity.ToTable("RollHistory");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+
+            entity.Property(e => e.CampaignId).IsRequired();
+            entity.Property(e => e.SessionId).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.RequestId).IsRequired();
+            entity.Property(e => e.UserId).IsRequired();
+            entity.Property(e => e.UserName).HasMaxLength(200);
+            entity.Property(e => e.DiceType).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.Label).HasMaxLength(200);
+
+            // Cascade delete with the parent Campaign so journal rows don't
+            // outlive the campaign they belong to. No inverse navigation on
+            // Campaign — keeps the entity flat (rolls are append-only history,
+            // not a normally-loaded child collection).
+            entity.HasOne<Models.Campaign>()
+                  .WithMany()
+                  .HasForeignKey(e => e.CampaignId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            // Journal queries: list a campaign's rolls newest-first. PG defaults
+            // index sort order to ASC; range scans on RolledAt with ORDER BY DESC
+            // still use the index efficiently for POC scope.
+            entity.HasIndex(e => new { e.CampaignId, e.RolledAt })
+                  .HasDatabaseName("ix_rollhistory_campaign_rolledat");
+
+            // Session-scoped views (e.g. recap of the latest game).
+            entity.HasIndex(e => e.SessionId)
+                  .HasDatabaseName("ix_rollhistory_session");
         });
     }
 
