@@ -407,6 +407,29 @@ public class GameHub : Hub
     }
 
     /// <summary>
+    /// Le MJ diffuse le lancement d'une carte de scénario à tous les abonnés
+    /// de la campagne. Chaque client reçoit "CampaignMapLaunched" avec la
+    /// configuration complète du nœud et les données de la carte (pour que
+    /// les joueurs sans localStorage local puissent la charger).
+    /// </summary>
+    /// <param name="campaignId">Identifiant de la campagne.</param>
+    /// <param name="configJson">SessionMapConfig sérialisé en JSON.</param>
+    /// <param name="mapData">Données brutes de la carte (JSON), peut être null.</param>
+    public async Task DmLaunchCampaignMap(Guid campaignId, string configJson, string? mapData)
+    {
+        var userId = GetUserId();
+        _logger.LogInformation(
+            "User {UserId} is launching a campaign map for campaign {CampaignId}",
+            userId, campaignId);
+
+        await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("CampaignMapLaunched", new
+        {
+            configJson,
+            mapData,
+        });
+    }
+
+    /// <summary>
     /// S'abonner aux notifications "activité Discord" (participants connectés au même salon vocal).
     /// </summary>
     public async Task SubscribeActivity(string guildId, string voiceChannelId)
