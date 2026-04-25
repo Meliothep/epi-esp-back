@@ -202,77 +202,6 @@ public class GameHub : Hub
 
         _logger.LogInformation("Rejoined user {UserId} to session {SessionId} (phase {Phase})",
             userId, session.SessionId, session.Combat.Phase);
-
-        // Replay pending roll requests so rejoining clients resume mid-flight state.
-        var isDmUser = session.DmUserId == userId;
-        foreach (var pending in session.PendingRolls.Values)
-        {
-            var isTarget = pending.RollValues.ContainsKey(userId);
-            var stillPending = pending.PendingUserIds.Contains(userId);
-
-            if (isDmUser)
-            {
-                var rejoinDmEchoPayload = new RollRequestedDmEchoPayload(
-                    pending.RequestId,
-                    pending.DiceType,
-                    pending.Label,
-                    pending.RollValues.Keys.ToList(),
-                    pending.RollValues.Count);
-                var rejoinDmEchoMessage = _messageSequencer.CreateMessage(session.SessionId, "RollRequestedDmEcho", rejoinDmEchoPayload);
-                await Clients.Caller.SendAsync("RollRequestedDmEcho", rejoinDmEchoMessage);
-
-                foreach (var (submittedUserId, submittedValue) in pending.SnapshotSubmittedValues())
-                {
-                    var p = session.Players.FirstOrDefault(pp => pp.UserId == submittedUserId);
-                    var rejoinDmResultPayload = new RollResultBroadcastPayload(
-                        pending.RequestId,
-                        submittedUserId,
-                        p?.UserName,
-                        pending.DiceType,
-                        submittedValue,
-                        pending.Label,
-                        false); // RequestComplete=false during replay — real completion already occurred
-                    var rejoinDmResultMessage = _messageSequencer.CreateMessage(session.SessionId, "RollResultBroadcast", rejoinDmResultPayload);
-                    await Clients.Caller.SendAsync("RollResultBroadcast", rejoinDmResultMessage);
-                }
-            }
-            else if (isTarget && stillPending)
-            {
-                var rejoinRollRequestedPayload = new RollRequestedPayload(
-                    pending.RequestId,
-                    pending.DiceType,
-                    pending.Label,
-                    pending.RollValues[userId]);
-                var rejoinRollRequestedMessage = _messageSequencer.CreateMessage(session.SessionId, "RollRequested", rejoinRollRequestedPayload);
-                await Clients.Caller.SendAsync("RollRequested", rejoinRollRequestedMessage);
-            }
-            else
-            {
-                var rejoinPublicPayload = new RollRequestedPublicPayload(
-                    pending.RequestId,
-                    pending.DiceType,
-                    pending.Label,
-                    pending.RollValues.Keys.ToList(),
-                    pending.RollValues.Count);
-                var rejoinPublicMessage = _messageSequencer.CreateMessage(session.SessionId, "RollRequestedPublic", rejoinPublicPayload);
-                await Clients.Caller.SendAsync("RollRequestedPublic", rejoinPublicMessage);
-
-                foreach (var (submittedUserId, submittedValue) in pending.SnapshotSubmittedValues())
-                {
-                    var p = session.Players.FirstOrDefault(pp => pp.UserId == submittedUserId);
-                    var rejoinPublicResultPayload = new RollResultBroadcastPayload(
-                        pending.RequestId,
-                        submittedUserId,
-                        p?.UserName,
-                        pending.DiceType,
-                        submittedValue,
-                        pending.Label,
-                        false);
-                    var rejoinPublicResultMessage = _messageSequencer.CreateMessage(session.SessionId, "RollResultBroadcast", rejoinPublicResultPayload);
-                    await Clients.Caller.SendAsync("RollResultBroadcast", rejoinPublicResultMessage);
-                }
-            }
-        }
     }
 
     /// <summary>
@@ -852,6 +781,94 @@ public class GameHub : Hub
     {
         _logger.LogDebug("Ping received from {ConnectionId}", Context.ConnectionId);
         await Clients.Caller.SendAsync("Pong", DateTime.UtcNow);
+    }
+
+    /// <summary>
+    /// Client-driven replay of pending roll requests. Front invokes this after
+    /// DiceRequestListener mounts AND sessionState.hubUserId is populated, so
+    /// the events have a real handler + target. Idempotent and safe to invoke
+    /// multiple times — front store dedupes by requestId.
+    /// Splitting this out of OnConnectedAsync removes a timing race where the
+    /// rejoin replay arrived before the front listener was bound, dropping
+    /// the events with "No client method with the name 'rollrequested' found".
+    /// </summary>
+    public async Task RequestRollReplay()
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null) return; // not in session, nothing to replay
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null) return;
+        var userId = GetUserId();
+
+        var isDmUser = session.DmUserId == userId;
+        foreach (var pending in session.PendingRolls.Values)
+        {
+            var isTarget = pending.RollValues.ContainsKey(userId);
+            var stillPending = pending.PendingUserIds.Contains(userId);
+
+            if (isDmUser)
+            {
+                var rejoinDmEchoPayload = new RollRequestedDmEchoPayload(
+                    pending.RequestId,
+                    pending.DiceType,
+                    pending.Label,
+                    pending.RollValues.Keys.ToList(),
+                    pending.RollValues.Count);
+                var rejoinDmEchoMessage = _messageSequencer.CreateMessage(sessionId, "RollRequestedDmEcho", rejoinDmEchoPayload);
+                await Clients.Caller.SendAsync("RollRequestedDmEcho", rejoinDmEchoMessage);
+
+                foreach (var (submittedUserId, submittedValue) in pending.SnapshotSubmittedValues())
+                {
+                    var p = session.Players.FirstOrDefault(pp => pp.UserId == submittedUserId);
+                    var rejoinDmResultPayload = new RollResultBroadcastPayload(
+                        pending.RequestId,
+                        submittedUserId,
+                        p?.UserName,
+                        pending.DiceType,
+                        submittedValue,
+                        pending.Label,
+                        false); // RequestComplete=false during replay — real completion already occurred
+                    var rejoinDmResultMessage = _messageSequencer.CreateMessage(sessionId, "RollResultBroadcast", rejoinDmResultPayload);
+                    await Clients.Caller.SendAsync("RollResultBroadcast", rejoinDmResultMessage);
+                }
+            }
+            else if (isTarget && stillPending)
+            {
+                var rejoinRollRequestedPayload = new RollRequestedPayload(
+                    pending.RequestId,
+                    pending.DiceType,
+                    pending.Label,
+                    pending.RollValues[userId]);
+                var rejoinRollRequestedMessage = _messageSequencer.CreateMessage(sessionId, "RollRequested", rejoinRollRequestedPayload);
+                await Clients.Caller.SendAsync("RollRequested", rejoinRollRequestedMessage);
+            }
+            else
+            {
+                var rejoinPublicPayload = new RollRequestedPublicPayload(
+                    pending.RequestId,
+                    pending.DiceType,
+                    pending.Label,
+                    pending.RollValues.Keys.ToList(),
+                    pending.RollValues.Count);
+                var rejoinPublicMessage = _messageSequencer.CreateMessage(sessionId, "RollRequestedPublic", rejoinPublicPayload);
+                await Clients.Caller.SendAsync("RollRequestedPublic", rejoinPublicMessage);
+
+                foreach (var (submittedUserId, submittedValue) in pending.SnapshotSubmittedValues())
+                {
+                    var p = session.Players.FirstOrDefault(pp => pp.UserId == submittedUserId);
+                    var rejoinPublicResultPayload = new RollResultBroadcastPayload(
+                        pending.RequestId,
+                        submittedUserId,
+                        p?.UserName,
+                        pending.DiceType,
+                        submittedValue,
+                        pending.Label,
+                        false);
+                    var rejoinPublicResultMessage = _messageSequencer.CreateMessage(sessionId, "RollResultBroadcast", rejoinPublicResultPayload);
+                    await Clients.Caller.SendAsync("RollResultBroadcast", rejoinPublicResultMessage);
+                }
+            }
+        }
     }
 
     /// <summary>
