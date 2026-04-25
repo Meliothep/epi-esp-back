@@ -3,6 +3,7 @@ using DnDiscordAPI.Games.Character.DTOs;
 using DnDiscordAPI.Games.Character.Models;
 using DnDiscordAPI.Games.Character.Services;
 using DnDiscordAPI.Games.Database;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.InMemory;
@@ -194,6 +195,68 @@ public class CharacterProgressionAdapterTests
         Assert.Equal(0, reloaded!.ExperiencePoints);
     }
 
+    [Fact]
+    public async Task AwardExperienceAsync_RollsBack_WhenLevelUpThrowsMidLoop()
+    {
+        // Real transactional DB required: the EF Core InMemory provider used by other tests
+        // in this file silently ignores BeginTransactionAsync, so a rollback assertion against
+        // it would always pass and prove nothing. SQLite-in-memory honours transactions and
+        // is in-process / connection-scoped, so the open SqliteConnection keeps the database
+        // alive across the multiple DbContext instances we use to bypass the change tracker
+        // when verifying committed state.
+        using var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        var options = new DbContextOptionsBuilder<GamesDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        Guid characterId;
+        Guid ownerGuid;
+        using (var setupDb = new GamesDbContext(options))
+        {
+            setupDb.Database.EnsureCreated();
+            var seeded = SeedCharacter(setupDb, level: 1, xp: 0);
+            characterId = seeded.Id;
+            ownerGuid = OwnerGuid(seeded);
+        }
+
+        // Stub bumps Level to 2 + saves on the FIRST LevelUpAsync(ctx, ...) call so the
+        // transaction has uncommitted state to roll back, then throws on the SECOND call
+        // (mid-loop crash). 2000 XP at threshold 1000 => 2 level-ups requested.
+        using (var adapterDb = new GamesDbContext(options))
+        {
+            var seedFromDb = await adapterDb.Characters.AsNoTracking().FirstAsync(c => c.Id == characterId);
+            var stub = new StubCharacterService(
+                seedFromDb,
+                throwOnCallNumber: 2,
+                ctxLevelUpSideEffect: async (ctx, id) =>
+                {
+                    var tracked = await ctx.Characters.FindAsync(id);
+                    if (tracked is null) return;
+                    tracked.Level++;
+                    await ctx.SaveChangesAsync();
+                });
+            var adapter = new CharacterProgressionAdapter(stub, adapterDb);
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => adapter.AwardExperienceAsync(characterId, ownerGuid, 2000));
+            Assert.Contains("simulated mid-loop failure", ex.Message);
+            Assert.Equal(2, stub.LevelUpCallCount);
+        }
+
+        // Fresh DbContext bypasses the adapter context's change tracker so we read what was
+        // actually committed to SQLite. Both Level and XP must be at their pre-transaction
+        // values: the partial Level=2 write from stub call 1 was rolled back, and the
+        // post-loop XP write was never reached.
+        using (var verifyDb = new GamesDbContext(options))
+        {
+            var rolled = await verifyDb.Characters.FindAsync(characterId);
+            Assert.NotNull(rolled);
+            Assert.Equal(1, rolled!.Level);
+            Assert.Equal(0, rolled.ExperiencePoints);
+        }
+    }
+
     // ── ForceLevelUp ─────────────────────────────────────────────────────────
 
     [Fact]
@@ -330,6 +393,8 @@ public class CharacterProgressionAdapterTests
 internal sealed class StubCharacterService : ICharacterService
 {
     private readonly Character _seed;
+    private readonly int _throwOnCallNumber;
+    private readonly Func<GamesDbContext, Guid, Task>? _ctxLevelUpSideEffect;
     private int _levelUpCalls = 0;
 
     public int LevelUpCallCount => _levelUpCalls;
@@ -340,7 +405,23 @@ internal sealed class StubCharacterService : ICharacterService
         GoldPieces = 20, PlatinumPieces = 1, TotalInCopper = 2715
     };
 
-    public StubCharacterService(Character seed) => _seed = seed;
+    /// <summary>
+    /// <paramref name="throwOnCallNumber"/> defaults to <c>-1</c> so existing tests behave
+    /// as before. Set to <c>N</c> (1-based) to simulate a mid-loop crash on the Nth
+    /// <see cref="LevelUpAsync(Guid)"/> / <see cref="LevelUpAsync(GamesDbContext, Guid)"/>
+    /// invocation. <paramref name="ctxLevelUpSideEffect"/> is invoked on the ctx-overload
+    /// path to let the rollback test produce real uncommitted DB state inside the adapter's
+    /// open transaction.
+    /// </summary>
+    public StubCharacterService(
+        Character seed,
+        int throwOnCallNumber = -1,
+        Func<GamesDbContext, Guid, Task>? ctxLevelUpSideEffect = null)
+    {
+        _seed = seed;
+        _throwOnCallNumber = throwOnCallNumber;
+        _ctxLevelUpSideEffect = ctxLevelUpSideEffect;
+    }
 
     public Task<CharacterDto> GetCharacterAsync(Guid characterId)
         => Task.FromResult(ToDto(_seed.Level));
@@ -348,11 +429,20 @@ internal sealed class StubCharacterService : ICharacterService
     public Task<CharacterDto> LevelUpAsync(Guid characterId)
     {
         _levelUpCalls++;
+        if (_levelUpCalls == _throwOnCallNumber)
+            throw new InvalidOperationException("simulated mid-loop failure");
         return Task.FromResult(ToDto(_seed.Level + _levelUpCalls));
     }
 
-    public Task<CharacterDto> LevelUpAsync(GamesDbContext ctx, Guid characterId)
-        => LevelUpAsync(characterId);
+    public async Task<CharacterDto> LevelUpAsync(GamesDbContext ctx, Guid characterId)
+    {
+        _levelUpCalls++;
+        if (_levelUpCalls == _throwOnCallNumber)
+            throw new InvalidOperationException("simulated mid-loop failure");
+        if (_ctxLevelUpSideEffect is not null)
+            await _ctxLevelUpSideEffect(ctx, characterId);
+        return ToDto(_seed.Level + _levelUpCalls);
+    }
 
     public Task<WalletDto> ModifyWalletAsync(Guid characterId, ModifyWalletRequest request)
     {
