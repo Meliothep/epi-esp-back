@@ -1,0 +1,54 @@
+name: .NET CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore
+
+      - name: Test
+        run: dotnet test --no-build --verbosity normal
+
+      # Catches "I changed the entity but forgot a migration" before deploy.
+      # Migrations run at startup (per CLAUDE.md), so a model/migration drift
+      # results in a startup failure and a 502 in production. Same class of
+      # bug as the front nginx crash-loop.
+      - name: Install dotnet-ef
+        run: dotnet tool install --global dotnet-ef
+
+      - name: EF migration drift — CampaignDbContext
+        run: |
+          dotnet ef migrations has-pending-model-changes \
+            --project src/DnDiscordAPI/DnDiscordAPI.csproj \
+            --context CampaignDbContext
+
+      - name: EF migration drift — GamesDbContext
+        run: |
+          dotnet ef migrations has-pending-model-changes \
+            --project src/DnDiscordAPI/DnDiscordAPI.csproj \
+            --context GamesDbContext
+
+      # Build the production Docker image. Catches Dockerfile typos, missing
+      # files, and multi-stage build errors before Dokploy hits them. We do
+      # not start the container here because runtime startup needs a live DB
+      # (migrations run at startup) — the dotnet test step already validated
+      # runtime behavior with Testcontainers.
+      - name: Production image build
+        run: docker build -f Services.Dockerfile -t back-smoke .

@@ -1,4 +1,121 @@
-cobertura
-.idea
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio files
+.vs/
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+
+# Rider
+.idea/
+
+# AI assistants
+.cursor/
+.cursorrules
+CLAUDE.md
+.claude/
+
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+
+# Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.trx
+*.coverage
+*.coveragexml
+cobertura/
+
+# NCrunch
+*.ncrunch*
+_NCrunch_*
+.*crunch*.local.xml
+nCrunchTemp_*
+
+# Chutzpah
+_Chutzpah*
+
+# Resharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# JetBrains
+*.sln.iml
+
+# Code Coverage
+coverage*.json
+coverage*.xml
+coverage*.info
+
+# Publish output
+publish/
+out/
+
+# OS files
 .DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Rider
+*.sln.iml
+
+# User-specific files
+*.rsuser
+*.user
+*.userosscache
+*.sln.docstates
+
+# Application specific
+appsettings.*.local.json
+secrets.json
+.env
+.env.local
+.env.*.local
+
+# Entity Framework migrations - keep these
+!**/Migrations/*.cs
+
+# Temp files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Fake
 .fake
+
+# code-review-graph (strict ignore)
+.code-review-graph/
+.code-review-graphignore
+.code-review-graph*
+
+# graphify
+graphify-out/
+.graphify_*
+.graphifyignore
