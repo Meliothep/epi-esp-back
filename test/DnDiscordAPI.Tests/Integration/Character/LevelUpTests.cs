@@ -156,11 +156,41 @@ public sealed class LevelUpTests
     // ── Guard: level-up of non-existent character ─────────────────────────────
 
     [Fact]
-    public async Task LevelUp_NonExistentCharacter_ReturnsNotFound()
+    public async Task LevelUp_NonExistentCharacter_IsForbidden()
     {
+        // Ownership check runs before service lookup; non-existent IDs surface as
+        // 403 (same as wallet endpoints) to prevent character-id enumeration.
         var client = Client();
         var response = await client.PostAsync($"/api/games/character/{Guid.NewGuid()}/level-up", null);
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    // ── Ownership enforcement (regression: non-owner could level any character) ─
+
+    [Fact]
+    public async Task LevelUp_NonOwner_IsForbidden()
+    {
+        var owner = Client();
+        var charId = await CreateCharacterAsync(owner, "OwnedHero");
+
+        const string strangerDiscordId = "933000000000000093";
+        var stranger = _fixture.CreateAuthenticatedClient(strangerDiscordId);
+
+        var response = await stranger.PostAsync($"/api/games/character/{charId}/level-up", null);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task LevelUp_RequiresAuth()
+    {
+        var owner = Client();
+        var charId = await CreateCharacterAsync(owner, "AnonTarget");
+
+        var unauthClient = _fixture.factory!.CreateClient();
+        var response = await unauthClient.PostAsync($"/api/games/character/{charId}/level-up", null);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
