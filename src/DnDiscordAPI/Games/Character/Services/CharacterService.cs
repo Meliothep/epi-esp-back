@@ -14,6 +14,12 @@ namespace DnDiscordAPI.Games.Character.Services
         Task<List<CharacterDto>> GetUserCharactersAsync(string discordUserId);
         Task<CharacterDto> UpdateHitPointsAsync(Guid characterId, int newHitPoints);
         Task<CharacterDto> LevelUpAsync(Guid characterId);
+        /// <summary>
+        /// Overload that runs LevelUp against a caller-supplied <see cref="GamesDbContext"/>
+        /// so the caller can enroll the work in its own transaction (shared connection /
+        /// shared change tracker). Does NOT begin or commit a transaction itself.
+        /// </summary>
+        Task<CharacterDto> LevelUpAsync(GamesDbContext ctx, Guid characterId);
         Task<WalletDto> GetWalletAsync(Guid characterId);
         Task<WalletDto> ModifyWalletAsync(Guid characterId, ModifyWalletRequest request);
 
@@ -46,6 +52,9 @@ namespace DnDiscordAPI.Games.Character.Services
 
         public async Task<CharacterDto> CreateCharacterAsync(string discordUserId, CreateCharacterRequest request)
         {
+            if (!request.Class.IsPlayable())
+                throw new ArgumentException($"La classe {request.Class} n'est pas jouable.", nameof(request));
+
             // Obtenir les traits de race et de classe
             var raceTraits = RaceTraits.GetTraits(request.Race);
             var classTraits = ClassTraits.GetTraits(request.Class);
@@ -64,6 +73,7 @@ namespace DnDiscordAPI.Games.Character.Services
                 Class = request.Class,
                 Race = request.Race,
                 Level = 1,
+                ExperiencePoints = 0,
                 Abilities = finalAbilities,
                 Wallet = new Wallet(),
                 CreatedAt = DateTime.UtcNow,
@@ -145,28 +155,44 @@ namespace DnDiscordAPI.Games.Character.Services
             };
         }
 
-        public async Task<CharacterDto> LevelUpAsync(Guid characterId)
+        public Task<CharacterDto> LevelUpAsync(Guid characterId)
+            => LevelUpAsync(_context, characterId);
+
+        public async Task<CharacterDto> LevelUpAsync(GamesDbContext ctx, Guid characterId)
         {
-            var character = await _context.Characters.FindAsync(characterId);
+            var character = await ctx.Characters.FindAsync(characterId);
             if (character == null)
                 throw new KeyNotFoundException($"Character {characterId} not found");
+
+            var previousLevel = character.Level;
 
             // Augmenter le niveau
             character.Level++;
 
+            // Lightweight stat progression: every 4 levels, grant an ability-score
+            // increase according to class fantasy, capped to 20.
+            ApplyAbilityScoreIncrease(character, _logger);
+
             // Obtenir les traits de classe pour le calcul des HP
             var classTraits = character.GetClassTraits();
             var constitutionModifier = character.Abilities.GetModifier(character.Abilities.Constitution);
-            
+
             // Recalculer les HP maximaux pour le nouveau niveau
             var newMaxHp = classTraits.CalculateMaxHitPoints(character.Level, constitutionModifier);
             var hpIncrease = newMaxHp - character.MaxHitPoints;
-            
+
             character.MaxHitPoints = newMaxHp;
-            character.CurrentHitPoints += hpIncrease; // On augmente aussi les HP actuels
+            character.CurrentHitPoints = Math.Clamp(character.CurrentHitPoints + hpIncrease, 0, character.MaxHitPoints);
+
+            // Keep derived combat stats in sync with updated abilities.
+            // AC unarmored only — extend when armor system lands
+            character.ArmorClass = 10 + character.Abilities.GetModifier(character.Abilities.Dexterity);
+            // Init baseline — extend with feats / Bard JoaT when added
+            character.Initiative = character.Abilities.GetModifier(character.Abilities.Dexterity);
+
             character.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            await ctx.SaveChangesAsync();
 
             _logger.LogInformation(
                 "Character {Name} (ID: {Id}) leveled up to level {Level}. HP: {Current}/{Max}",
@@ -177,7 +203,71 @@ namespace DnDiscordAPI.Games.Character.Services
                 character.MaxHitPoints
             );
 
+            _logger.LogDebug(
+                "Character {Id} level-up details: {PreviousLevel}->{Level}, AC={ArmorClass}, Init={Initiative}, STR={Strength}, DEX={Dexterity}, CON={Constitution}, INT={Intelligence}, WIS={Wisdom}, CHA={Charisma}",
+                character.Id,
+                previousLevel,
+                character.Level,
+                character.ArmorClass,
+                character.Initiative,
+                character.Abilities.Strength,
+                character.Abilities.Dexterity,
+                character.Abilities.Constitution,
+                character.Abilities.Intelligence,
+                character.Abilities.Wisdom,
+                character.Abilities.Charisma);
+
             return _mapper.Map<CharacterDto>(character);
+        }
+
+        private static int ClampAbility(int value) => Math.Clamp(value, 1, 20);
+
+        private static void ApplyAbilityScoreIncrease(Models.Character character, ILogger<CharacterService> logger)
+        {
+            var expectedAsiCount = character.Level / 4;
+            if (character.AsiAppliedCount >= expectedAsiCount) return;
+
+            var bumped = true;
+            switch (character.Class)
+            {
+                case Models.CharacterClass.Barbare:
+                case Models.CharacterClass.Guerrier:
+                case Models.CharacterClass.Paladin:
+                    character.Abilities.Strength = ClampAbility(character.Abilities.Strength + 2);
+                    break;
+
+                case Models.CharacterClass.Voleur:
+                case Models.CharacterClass.Rodeur:
+                    character.Abilities.Dexterity = ClampAbility(character.Abilities.Dexterity + 2);
+                    break;
+
+                case Models.CharacterClass.Moine:
+                    character.Abilities.Dexterity = ClampAbility(character.Abilities.Dexterity + 1);
+                    character.Abilities.Wisdom = ClampAbility(character.Abilities.Wisdom + 1);
+                    break;
+
+                case Models.CharacterClass.Barde:
+                case Models.CharacterClass.Ensorceleur:
+                case Models.CharacterClass.Sorcier:
+                    character.Abilities.Charisma = ClampAbility(character.Abilities.Charisma + 2);
+                    break;
+
+                case Models.CharacterClass.Clerc:
+                case Models.CharacterClass.Druide:
+                    character.Abilities.Wisdom = ClampAbility(character.Abilities.Wisdom + 2);
+                    break;
+
+                case Models.CharacterClass.Magicien:
+                    character.Abilities.Intelligence = ClampAbility(character.Abilities.Intelligence + 2);
+                    break;
+
+                default:
+                    logger.LogWarning("No ASI configured for character class {Class}. If a new class was added to the enum, update ApplyAbilityScoreIncrease.", character.Class);
+                    bumped = false;
+                    break;
+            }
+
+            if (bumped) character.AsiAppliedCount++;
         }
 
         private int RollHitDie(string characterClass)
