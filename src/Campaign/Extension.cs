@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace DnDiscord.Campaign;
 
@@ -108,17 +109,18 @@ public static class CampaignExtensions
     /// <returns>The application for chaining.</returns>
     public static WebApplication UseCampaignModule(this WebApplication app)
     {
-        // Apply pending migrations (always, for Docker setup)
         using var scope = app.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<CampaignDbContext>();
         try
         {
+            app.Logger.LogInformation("Applying Campaign database migrations...");
             dbContext.Database.Migrate();
+            app.Logger.LogInformation("Campaign database migrations applied successfully.");
         }
         catch (Exception ex)
         {
-            // Log but don't crash - migrations might fail in some scenarios
-            Console.WriteLine($"Migration warning: {ex.Message}");
+            app.Logger.LogError(ex, "An error occurred while applying Campaign database migrations.");
+            if (app.Environment.IsProduction()) throw;
         }
 
         return app;

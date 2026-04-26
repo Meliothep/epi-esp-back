@@ -6,6 +6,8 @@
         public string DiscordUserId { get; set; }
         public string Name { get; set; }
         public int Level { get; set; }
+        public int ExperiencePoints { get; set; }
+        public int AsiAppliedCount { get; set; } = 0;
         public CharacterClass Class { get; set; }
         public CharacterRace Race { get; set; }
         public AbilityScores Abilities { get; set; }

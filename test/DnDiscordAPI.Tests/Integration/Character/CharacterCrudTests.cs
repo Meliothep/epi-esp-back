@@ -103,12 +103,68 @@ public sealed class CharacterCrudTests
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Theory]
+    [InlineData("Barde")]
+    [InlineData("Clerc")]
+    [InlineData("Druide")]
+    [InlineData("Moine")]
+    [InlineData("Paladin")]
+    [InlineData("Ensorceleur")]
+    [InlineData("Sorcier")]
+    public async Task CreateCharacter_WithNonPlayableClass_ReturnsBadRequest(string nonPlayableClass)
+    {
+        var request = new
+        {
+            name = "Ghost",
+            @class = nonPlayableClass,
+            race = "Humain",
+            abilities = new
+            {
+                strength = 10, dexterity = 10, constitution = 10,
+                intelligence = 10, wisdom = 10, charisma = 10
+            }
+        };
+
+        var response = await _client.PostAsJsonAsync("/api/games/character", request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("Barbare")]
+    [InlineData("Guerrier")]
+    [InlineData("Magicien")]
+    [InlineData("Rodeur")]
+    [InlineData("Voleur")]
+    public async Task CreateCharacter_WithPlayableClass_ReturnsCreated(string playableClass)
+    {
+        var request = new
+        {
+            name = $"Hero_{playableClass}",
+            @class = playableClass,
+            race = "Humain",
+            abilities = new
+            {
+                strength = 10, dexterity = 10, constitution = 10,
+                intelligence = 10, wisdom = 10, charisma = 10
+            }
+        };
+
+        var response = await _client.PostAsJsonAsync("/api/games/character", request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<CharacterTestResponse>();
+        Assert.NotNull(result);
+        Assert.Equal(playableClass, result.Class);
+    }
 }
 
 public record CharacterTestResponse(
     Guid Id,
     string Name,
     int Level,
+    int ExperiencePoints,
     string Class,
     string Race,
     int CurrentHitPoints,
