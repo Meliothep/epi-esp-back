@@ -90,6 +90,9 @@ namespace DnDiscordAPI.Games.Controllers
         [HttpPost("{id}/level-up")]
         public async Task<ActionResult<CharacterDto>> LevelUp(Guid id)
         {
+            if (!await IsOwnerAsync(id))
+                return Forbid();
+
             try
             {
                 var character = await _characterService.LevelUpAsync(id);
