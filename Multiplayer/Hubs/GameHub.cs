@@ -1,6 +1,9 @@
+using DnDiscord.Campaign.DataAccess;
+using DnDiscord.Campaign.DataAccess.Models;
 using DnDiscord.Campaign.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Multiplayer.Models;
 using Multiplayer.Models.Messages;
@@ -23,6 +26,7 @@ public class GameHub : Hub
     private readonly ICampaignMapLookupService _mapLookup;
     private readonly CombatManager _combatManager;
     private readonly SpawnPlacementService _spawnPlacementService;
+    private readonly IServiceProvider _serviceProvider;
 
     /// <summary>
     /// Constructeur du GameHub
@@ -32,7 +36,8 @@ public class GameHub : Hub
         ICharacterLookupService characterLookup, ICharacterProgressionService characterProgression,
         IInventoryGrantService inventoryGrant,
         ICampaignMapLookupService mapLookup, CombatManager combatManager,
-        SpawnPlacementService spawnPlacementService)
+        SpawnPlacementService spawnPlacementService,
+        IServiceProvider serviceProvider)
     {
         _logger = logger;
         _sessionManager = sessionManager;
@@ -44,6 +49,7 @@ public class GameHub : Hub
         _mapLookup = mapLookup;
         _combatManager = combatManager;
         _spawnPlacementService = spawnPlacementService;
+        _serviceProvider = serviceProvider;
     }
 
     /// <summary>
@@ -224,6 +230,11 @@ public class GameHub : Hub
 
         if (sessionId != null)
         {
+            // Capture the session (and whether the disconnecting user is the DM)
+            // BEFORE MarkPlayerDisconnected mutates state.
+            var session = _sessionManager.GetSession(sessionId);
+            var isDmDisconnecting = session != null && session.DmUserId == userId;
+
             // Marquer comme déconnecté (grace period pour reconnexion)
             _sessionManager.MarkPlayerDisconnected(Context.ConnectionId);
 
@@ -234,6 +245,27 @@ public class GameHub : Hub
                 connectionId = Context.ConnectionId,
                 timestamp = DateTime.UtcNow
             });
+
+            // If the DM just dropped, cancel every in-flight roll request so
+            // targeted players stop waiting on results that will never broadcast.
+            // Snapshot the keys to keep mutation-during-iteration behaviour
+            // explicit; TryRemove guards against races with an explicit
+            // DmCancelRollRequest that happens to land in the same instant.
+            if (isDmDisconnecting && session != null)
+            {
+                foreach (var requestId in session.PendingRolls.Keys.ToList())
+                {
+                    if (session.PendingRolls.TryRemove(requestId, out var pending))
+                    {
+                        var disconnectCancelPayload = new RollCanceledPayload(requestId, pending.Label, pending.PendingUserIds.ToList());
+                        var disconnectCancelMessage = _messageSequencer.CreateMessage(sessionId, "RollCanceled", disconnectCancelPayload);
+                        // OthersInGroup excludes the disconnecting DM's still-attached connection
+                        // so a grace-period reconnect doesn't see stale "canceled" entries for
+                        // requests the server has already removed.
+                        await Clients.OthersInGroup(sessionId).SendAsync("RollCanceled", disconnectCancelMessage);
+                    }
+                }
+            }
         }
 
         await base.OnDisconnectedAsync(exception);
@@ -761,6 +793,94 @@ public class GameHub : Hub
     }
 
     /// <summary>
+    /// Client-driven replay of pending roll requests. Front invokes this after
+    /// DiceRequestListener mounts AND sessionState.hubUserId is populated, so
+    /// the events have a real handler + target. Idempotent and safe to invoke
+    /// multiple times — front store dedupes by requestId.
+    /// Splitting this out of OnConnectedAsync removes a timing race where the
+    /// rejoin replay arrived before the front listener was bound, dropping
+    /// the events with "No client method with the name 'rollrequested' found".
+    /// </summary>
+    public async Task RequestRollReplay()
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null) return; // not in session, nothing to replay
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null) return;
+        var userId = GetUserId();
+
+        var isDmUser = session.DmUserId == userId;
+        foreach (var pending in session.PendingRolls.Values)
+        {
+            var isTarget = pending.RollValues.ContainsKey(userId);
+            var stillPending = pending.PendingUserIds.Contains(userId);
+
+            if (isDmUser)
+            {
+                var rejoinDmEchoPayload = new RollRequestedDmEchoPayload(
+                    pending.RequestId,
+                    pending.DiceType,
+                    pending.Label,
+                    pending.RollValues.Keys.ToList(),
+                    pending.RollValues.Count);
+                var rejoinDmEchoMessage = _messageSequencer.CreateMessage(sessionId, "RollRequestedDmEcho", rejoinDmEchoPayload);
+                await Clients.Caller.SendAsync("RollRequestedDmEcho", rejoinDmEchoMessage);
+
+                foreach (var (submittedUserId, submittedValue) in pending.SnapshotSubmittedValues())
+                {
+                    var p = session.Players.FirstOrDefault(pp => pp.UserId == submittedUserId);
+                    var rejoinDmResultPayload = new RollResultBroadcastPayload(
+                        pending.RequestId,
+                        submittedUserId,
+                        p?.UserName,
+                        pending.DiceType,
+                        submittedValue,
+                        pending.Label,
+                        false); // RequestComplete=false during replay — real completion already occurred
+                    var rejoinDmResultMessage = _messageSequencer.CreateMessage(sessionId, "RollResultBroadcast", rejoinDmResultPayload);
+                    await Clients.Caller.SendAsync("RollResultBroadcast", rejoinDmResultMessage);
+                }
+            }
+            else if (isTarget && stillPending)
+            {
+                var rejoinRollRequestedPayload = new RollRequestedPayload(
+                    pending.RequestId,
+                    pending.DiceType,
+                    pending.Label,
+                    pending.RollValues[userId]);
+                var rejoinRollRequestedMessage = _messageSequencer.CreateMessage(sessionId, "RollRequested", rejoinRollRequestedPayload);
+                await Clients.Caller.SendAsync("RollRequested", rejoinRollRequestedMessage);
+            }
+            else
+            {
+                var rejoinPublicPayload = new RollRequestedPublicPayload(
+                    pending.RequestId,
+                    pending.DiceType,
+                    pending.Label,
+                    pending.RollValues.Keys.ToList(),
+                    pending.RollValues.Count);
+                var rejoinPublicMessage = _messageSequencer.CreateMessage(sessionId, "RollRequestedPublic", rejoinPublicPayload);
+                await Clients.Caller.SendAsync("RollRequestedPublic", rejoinPublicMessage);
+
+                foreach (var (submittedUserId, submittedValue) in pending.SnapshotSubmittedValues())
+                {
+                    var p = session.Players.FirstOrDefault(pp => pp.UserId == submittedUserId);
+                    var rejoinPublicResultPayload = new RollResultBroadcastPayload(
+                        pending.RequestId,
+                        submittedUserId,
+                        p?.UserName,
+                        pending.DiceType,
+                        submittedValue,
+                        pending.Label,
+                        false);
+                    var rejoinPublicResultMessage = _messageSequencer.CreateMessage(sessionId, "RollResultBroadcast", rejoinPublicResultPayload);
+                    await Clients.Caller.SendAsync("RollResultBroadcast", rejoinPublicResultMessage);
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Récupère l'ID utilisateur (Guid) depuis le JWT.
     /// Utilise le même service que l'API Campaign pour convertir l'ID Discord en Guid.
     /// </summary>
@@ -1044,8 +1164,7 @@ public class GameHub : Hub
         if (session.DmUserId != userId)
             throw new HubException("Only the DM can do hidden rolls");
 
-        var rng = new Random();
-        var result = rng.Next(1, diceType + 1);
+        var result = Random.Shared.Next(1, diceType + 1);
 
         var payload = new DmHiddenRollPayload
         {
@@ -1542,6 +1661,189 @@ public class GameHub : Hub
         };
         var hpMessage = _messageSequencer.CreateMessage(session.SessionId, "UnitHpAdjusted", hpPayload);
         await Clients.Group(session.SessionId).SendAsync("UnitHpAdjusted", hpMessage);
+    }
+
+    /// <summary>
+    /// DM triggers a d20 roll request for one or more players. Each target
+    /// receives a private RollRequested event with their pre-rolled value;
+    /// the DM gets a DmEcho; and the whole session sees a public announcement.
+    /// </summary>
+    public async Task DmRequestRoll(DmRollRequestPayload payload)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null)
+            throw new HubException("Not in a session");
+
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null)
+            throw new HubException("Session not found");
+
+        var userId = GetUserId();
+        if (session.DmUserId != userId)
+            throw new HubException("Only the DM can request rolls");
+
+        if (payload.DiceType != "d20")
+            throw new HubException("Only d20 is supported in v1");
+
+        if (session.PendingRolls.Count >= 10)
+            throw new HubException("Too many open roll requests (max 10)");
+
+        // Require a live ConnectionId alongside the Connected status so the
+        // per-target SendAsync below can never silently drop a target that is
+        // counted in PendingUserIds — that would leave the request waiting on
+        // a player who never received it. If a target reconnects later, their
+        // RequestRollReplay invocation rehydrates the pending roll for them.
+        var targets = payload.TargetUserIds.Count > 0
+            ? payload.TargetUserIds
+                .Where(id => id != session.DmUserId && session.Players.Any(p =>
+                    p.UserId == id &&
+                    p.Role == PlayerRole.Player &&
+                    p.Status == ConnectionStatus.Connected &&
+                    p.ConnectionId != null))
+                .Distinct()
+                .ToList()
+            : session.Players
+                .Where(p => p.UserId != session.DmUserId &&
+                            p.Role == PlayerRole.Player &&
+                            p.Status == ConnectionStatus.Connected &&
+                            p.ConnectionId != null)
+                .Select(p => p.UserId)
+                .Distinct()
+                .ToList();
+
+        if (targets.Count == 0)
+            throw new HubException("No valid connected targets in session");
+
+        var requestId = Guid.NewGuid();
+        var values = targets.ToDictionary(id => id, _ => Random.Shared.Next(1, 21));
+        var pending = new PendingRollRequest
+        {
+            RequestId = requestId,
+            DiceType = "d20",
+            Label = payload.Label,
+            RollValues = values,
+            PendingUserIds = new HashSet<Guid>(targets),
+        };
+
+        if (!session.PendingRolls.TryAdd(requestId, pending))
+            throw new HubException("Roll request id collision — retry");
+
+        _logger.LogInformation(
+            "DmRequestRoll: session={SessionId}, requestId={RequestId}, label={Label}, dice={DiceType}, targetCount={TargetCount}, openPending={OpenPending}",
+            sessionId, requestId, payload.Label ?? "(none)", "d20", targets.Count, session.PendingRolls.Count);
+
+        // Per-target send via ConnectionId — DiscordUserIdProvider keys SignalR
+        // user routes by Discord snowflake, but session.Players[].UserId is the
+        // MD5-derived Guid, so Clients.User(uidGuid) would never match.
+        foreach (var (uid, val) in values)
+        {
+            var targetPlayer = session.Players.FirstOrDefault(p => p.UserId == uid);
+            if (targetPlayer?.ConnectionId == null) continue;
+            var rollRequestedPayload = new RollRequestedPayload(requestId, "d20", payload.Label, val);
+            var rollRequestedMessage = _messageSequencer.CreateMessage(sessionId, "RollRequested", rollRequestedPayload);
+            await Clients.Client(targetPlayer.ConnectionId).SendAsync("RollRequested", rollRequestedMessage);
+        }
+
+        var dmEchoPayload = new RollRequestedDmEchoPayload(requestId, "d20", payload.Label, targets, targets.Count);
+        var dmEchoMessage = _messageSequencer.CreateMessage(sessionId, "RollRequestedDmEcho", dmEchoPayload);
+        // DM is the caller of this method — Clients.Caller is the cleanest target
+        // and avoids the same UserId Guid vs snowflake mismatch.
+        await Clients.Caller.SendAsync("RollRequestedDmEcho", dmEchoMessage);
+
+        var publicPayload = new RollRequestedPublicPayload(requestId, "d20", payload.Label, targets, targets.Count);
+        var publicMessage = _messageSequencer.CreateMessage(sessionId, "RollRequestedPublic", publicPayload);
+        await Clients.Group(sessionId).SendAsync("RollRequestedPublic", publicMessage);
+    }
+
+    public async Task SubmitRollResult(SubmitRollResultPayload payload)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null) throw new HubException("Not in a session");
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null) throw new HubException("Session not found");
+
+        var userId = GetUserId();
+
+        if (!session.PendingRolls.TryGetValue(payload.RequestId, out var pending))
+        {
+            _logger.LogWarning(
+                "SubmitRollResult ignored: requestId {RequestId} not found (user {UserId}, session {SessionId})",
+                payload.RequestId, userId, sessionId);
+            return;
+        }
+
+        if (!pending.TrySubmit(userId, out var value, out var complete))
+        {
+            _logger.LogWarning(
+                "SubmitRollResult ignored by TrySubmit: requestId {RequestId}, user {UserId}",
+                payload.RequestId, userId);
+            return;
+        }
+
+        var player = session.Players.FirstOrDefault(p => p.UserId == userId);
+
+        // Persist the roll result to the campaign journal so it survives the
+        // in-memory session and shows up in the campaign log. DB failure must
+        // not block the live broadcast — the play loop is more important than
+        // the journal for POC scope.
+        if (session.CampaignId is Guid campaignId)
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<CampaignDbContext>();
+                db.RollHistory.Add(new RollHistoryEntry
+                {
+                    CampaignId = campaignId,
+                    SessionId = sessionId,
+                    RequestId = pending.RequestId,
+                    UserId = userId,
+                    UserName = player?.UserName,
+                    DiceType = pending.DiceType,
+                    Value = value,
+                    Label = pending.Label,
+                });
+                await db.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to persist roll result for request {RequestId} session {SessionId}",
+                    pending.RequestId, sessionId);
+            }
+        }
+
+        var rollResultPayload = new RollResultBroadcastPayload(
+            pending.RequestId,
+            userId,
+            player?.UserName,
+            pending.DiceType,
+            value,
+            pending.Label,
+            complete);
+        var rollResultMessage = _messageSequencer.CreateMessage(sessionId, "RollResultBroadcast", rollResultPayload);
+        await Clients.Group(sessionId).SendAsync("RollResultBroadcast", rollResultMessage);
+
+        if (complete)
+            session.PendingRolls.TryRemove(pending.RequestId, out _);
+    }
+
+    public async Task DmCancelRollRequest(Guid requestId)
+    {
+        var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
+        if (sessionId == null) throw new HubException("Not in a session");
+        var session = _sessionManager.GetSession(sessionId);
+        if (session == null) throw new HubException("Session not found");
+
+        if (session.DmUserId != GetUserId())
+            throw new HubException("Only the DM can cancel a roll");
+
+        if (!session.PendingRolls.TryRemove(requestId, out var pending))
+            return; // idempotent — already closed
+
+        var cancelPayload = new RollCanceledPayload(requestId, pending.Label, pending.PendingUserIds.ToList());
+        var cancelMessage = _messageSequencer.CreateMessage(sessionId, "RollCanceled", cancelPayload);
+        await Clients.Group(sessionId).SendAsync("RollCanceled", cancelMessage);
     }
 
     #endregion
