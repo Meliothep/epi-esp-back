@@ -75,11 +75,11 @@ public class CampaignMapService : ICampaignMapService
         return true;
     }
 
-    public async Task<CampaignMapDto?> GetByMapIdAsync(Guid mapId, CancellationToken ct = default)
+    public async Task<CampaignMapDto?> GetByMapIdAsync(Guid campaignId, Guid mapId, CancellationToken ct = default)
     {
         var row = await _db.Maps
             .AsNoTracking()
-            .FirstOrDefaultAsync(m => m.Id == mapId, ct);
+            .FirstOrDefaultAsync(m => m.CampaignId == campaignId && m.Id == mapId, ct);
         return row is null ? null : ToDto(row);
     }
 

@@ -395,6 +395,9 @@ public class GameHub : Hub
     public async Task DmExitMap(Guid campaignId, string nodeId)
     {
         var userId = GetUserId();
+        var session = _sessionManager.FindSessionByUser(userId);
+        if (session == null || session.DmUserId != userId || session.CampaignId != campaignId)
+            throw new HubException("Only the Dungeon Master can perform this action.");
 
         await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("CampaignMapExited", new
         {
@@ -418,6 +421,9 @@ public class GameHub : Hub
     public async Task DmLaunchCampaignMap(Guid campaignId, string configJson)
     {
         var userId = GetUserId();
+        var session = _sessionManager.FindSessionByUser(userId);
+        if (session == null || session.DmUserId != userId || session.CampaignId != campaignId)
+            throw new HubException("Only the Dungeon Master can perform this action.");
 
         await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("CampaignMapLaunched", new
         {
@@ -441,6 +447,9 @@ public class GameHub : Hub
     public async Task DmAdvanceNode(Guid campaignId, string fromNodeId, string nextNodeId)
     {
         var userId = GetUserId();
+        var session = _sessionManager.FindSessionByUser(userId);
+        if (session == null || session.DmUserId != userId || session.CampaignId != campaignId)
+            throw new HubException("Only the Dungeon Master can perform this action.");
 
         await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("NodeAdvanced", new
         {

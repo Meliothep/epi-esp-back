@@ -13,11 +13,11 @@ public interface ICampaignMapService
     Task<bool> DeleteAsync(Guid campaignId, Guid mapId, CancellationToken ct = default);
 
     /// <summary>
-    /// Récupère une map par son ID seul, sans restriction de campagne ni d'owner.
+    /// Récupère une map par son ID en vérifiant qu'elle appartient bien à la campagne donnée.
     /// Utilisé exclusivement par la route session-map pour les clients en session
     /// qui n'ont pas la map en cache et ne sont pas owners.
     /// </summary>
-    Task<CampaignMapDto?> GetByMapIdAsync(Guid mapId, CancellationToken ct = default);
+    Task<CampaignMapDto?> GetByMapIdAsync(Guid campaignId, Guid mapId, CancellationToken ct = default);
 }
 
 /// <summary>

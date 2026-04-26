@@ -112,7 +112,7 @@ public class CampaignMapsController : ControllerBase
         if (!await IsCampaignVisibleAsync(campaignId, ct))
             return NotFound(new ProblemDetails { Title = "Campaign not found" });
 
-        var map = await _mapService.GetByMapIdAsync(mapId, ct);
+        var map = await _mapService.GetByMapIdAsync(campaignId, mapId, ct);
         if (map is null) return NotFound(new ProblemDetails { Title = "Map not found" });
         return Ok(map);
     }
