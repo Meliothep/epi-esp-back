@@ -65,7 +65,7 @@ public class CampaignMapsController : ControllerBase
         if (!await _campaignService.IsDungeonMasterAsync(campaignId, _userContext.GetCurrentUserId(), ct))
             return Forbid();
 
-        var created = await _mapService.CreateAsync(campaignId, request, ct);
+        var created = await _mapService.CreateAsync(campaignId, _userContext.GetCurrentUserId(), request, ct);
         return CreatedAtAction(nameof(Get), new { campaignId, mapId = created.Id }, created);
     }
 
@@ -95,6 +95,26 @@ public class CampaignMapsController : ControllerBase
         var removed = await _mapService.DeleteAsync(campaignId, mapId, ct);
         if (!removed) return NotFound(new ProblemDetails { Title = "Map not found" });
         return NoContent();
+    }
+
+    /// <summary>
+    /// Récupère une map par son ID dans le contexte d'une campagne, sans restriction
+    /// d'owner. Accessible à tous les membres visibles de la campagne.
+    /// Utilisé par les joueurs en session pour mettre en cache une map dont ils
+    /// ne sont pas owners (ex : map créée par le MJ).
+    /// Route : GET api/campaigns/{campaignId}/maps/session/{mapId}
+    /// </summary>
+    [HttpGet("session/{mapId:guid}")]
+    [ProducesResponseType(typeof(CampaignMapDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetForSession(Guid campaignId, Guid mapId, CancellationToken ct)
+    {
+        if (!await IsCampaignVisibleAsync(campaignId, ct))
+            return NotFound(new ProblemDetails { Title = "Campaign not found" });
+
+        var map = await _mapService.GetByMapIdAsync(campaignId, mapId, ct);
+        if (map is null) return NotFound(new ProblemDetails { Title = "Map not found" });
+        return Ok(map);
     }
 
     /// <summary>

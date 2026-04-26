@@ -1,11 +1,15 @@
-﻿namespace DnDiscordAPI.Games.Character.Models
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace DnDiscordAPI.Games.Character.Models
 {
     public class Character
     {
         public Guid Id { get; set; }
         public string DiscordUserId { get; set; }
         public string Name { get; set; }
+        [ConcurrencyCheck]
         public int Level { get; set; }
+        [ConcurrencyCheck]
         public int ExperiencePoints { get; set; }
         public int AsiAppliedCount { get; set; } = 0;
         public CharacterClass Class { get; set; }

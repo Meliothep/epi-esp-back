@@ -58,7 +58,15 @@ public class CharacterProgressionAdapter : ICharacterProgressionService
 
         character.ExperiencePoints = remainder;
         character.UpdatedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync();
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new DbUpdateConcurrencyException(
+                $"Concurrency conflict saving XP remainder for character {characterId}. Retry the operation.", ex);
+        }
 
         await tx.CommitAsync();
 
