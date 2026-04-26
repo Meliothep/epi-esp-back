@@ -26,7 +26,7 @@ bld/
 .cursor/
 .cursorrules
 CLAUDE.md
-.claude/settings.local.json
+.claude/
 
 # VS Code
 .vscode/
