@@ -335,13 +335,71 @@ dotnet build
 dotnet test        # requires Docker — Testcontainers spins up PostgreSQL 16
 ```
 
-Integration tests use `IntegrationFixture<TEntryPoint>` (Testcontainers + `WebApplicationFactory`). `TestAuthHandler` fakes JWT auth via the `X-Test-UserId` header. Tests are **not parallelized** (single shared container per collection).
+### Test strategy
 
-Pure unit tests (no Docker):
+The suite lives in `test/DnDiscordAPI.Tests/` and is organized as a four-tier pyramid:
+
+```
+                    ┌──────────────────┐
+                    │   E2E workflow   │   ← 1 chained scenario
+                    │   create → invite → join → snapshot → export → restore
+                    ├──────────────────┤
+                    │   Smoke tests    │   ← every endpoint responds (no 500s)
+                    ├──────────────────┤
+                    │   Integration    │   ← Testcontainers + WebApplicationFactory
+                    │   ~13 fixtures   │     (Postgres 16, real EF, real HTTP)
+                    ├──────────────────┤
+                    │   Pure unit      │   ← no Docker, no DB, no HTTP
+                    │   validators · serializers · token service · progression
+                    └──────────────────┘
+```
+
+### Tooling
+
+- **`Testcontainers.PostgreSql`** — spins up PostgreSQL 16 per test collection (not per test) — Docker required.
+- **`WebApplicationFactory<TEntryPoint>`** — host the API in-process, swap DbContext registrations to point at the Testcontainer.
+- **`IntegrationFixture<TEntryPoint>`** — base class that wires up the container + factory + helpers (`CreateAuthenticatedClient`, `CreateClient`).
+- **`TestAuthHandler`** — fakes Discord JWT auth via the `X-Test-UserId` header so tests can assume a user identity without touching Discord.
+- **`xUnit` collections** — tests are **not parallelized** (`DisableParallelization = true`) since they share the Postgres container.
+
+### Coverage areas
+
+| Layer | Coverage |
+|---|---|
+| **Unit — validators** | `CampaignValidator`, `SnapshotValidator` — happy-path + boundary errors |
+| **Unit — serializers** | `SnapshotSerializer` — round-trip, schema versioning |
+| **Unit — security** | `TokenService` — JWT issuance, claim shape, expiration |
+| **Unit — progression** | `CharacterProgressionAdapter` — XP curves, level-up, ASI idempotency, transactional rollback |
+| **Unit — combat** | `CombatManager`, scripted full-combat scenarios, `TurnManager`, deterministic `SpawnPlacementService` (FNV-1a seeded), `PendingRollRequest` lifecycle |
+| **Unit — sessions** | `SessionManager` (RemoveSession side-effects, sequence-state cleanup) |
+| **Unit — DTOs** | `CurrencyType` JSON serialization parity |
+| **Integration — Campaign** | CRUD + auth gates + members + sessions + snapshot creation/restoration/export-import/validation + maps |
+| **Integration — Character** | CRUD, level-up + ASI, wallet ownership |
+| **Integration — Inventory** | DM auth, catalog, persistence |
+| **Integration — Auth** | RGPD delete + export, tombstone re-auth |
+| **Integration — Smoke** | Every controller endpoint responds without 500 |
+| **Integration — E2E** | Full workflow: create campaign → invite → join → snapshot → export → restore |
+
+### What is NOT covered
+
+- **SignalR hub end-to-end** — `GameHub` is exercised through unit tests on the underlying services (`CombatManager`, `SessionManager`, `SpawnPlacementService`); the hub layer itself is tested manually against the front-end.
+- **Discord OAuth callback** — the `POST /api/auth/discord/callback` exchange is mocked at the boundary (we do not call discord.com from CI). Use `POST /api/auth/dev/login` for local end-to-end auth flow tests.
+
+### Running subsets
+
+Pure unit tests (no Docker — fastest feedback loop):
 
 ```sh
-dotnet test --filter "CampaignValidatorTests|SnapshotValidatorTests|TokenServiceTests|SnapshotSerializerTests"
+dotnet test --filter "FullyQualifiedName~Unit|FullyQualifiedName~Utils"
 ```
+
+Integration only (Docker required):
+
+```sh
+dotnet test --filter "FullyQualifiedName~Integration"
+```
+
+Note: pure unit tests live under both `test/DnDiscordAPI.Tests/Unit/` (game/multiplayer logic) and `test/DnDiscordAPI.Tests/Utils/` (validators, serializers, token service) — the filter above covers both.
 
 ---
 
@@ -368,15 +426,34 @@ Required env vars — the compose file will refuse to start if they are unset:
 
 ## CI/CD
 
-**CI** — `.github/workflows/ci.yml`, runs on push and PR to `main` and `dev`:
+### CI — `.github/workflows/ci.yml`
 
-1. `dotnet restore` → `dotnet build` → `dotnet test`
-2. EF migration drift check for both `CampaignDbContext` and `GamesDbContext` (`dotnet ef migrations has-pending-model-changes`). A model/migration drift causes a startup failure in production (migrations run at startup), so this catches the problem before deploy.
-3. Production Docker image build (`Services.Dockerfile`) — validates the multi-stage build without starting the container.
+Triggered on every push and pull request to `main` and `dev`. Pipeline stages run sequentially; any failure blocks the merge.
 
-**CD** — Dokploy auto-deploys on push to configured branches via a GitHub App integration.
+```
+┌──────────────┐  ┌──────────────┐  ┌─────────────────┐  ┌──────────────────┐  ┌────────────────┐
+│  Restore +   │→ │  Build +     │→ │  EF migration   │→ │  Production      │→ │   Status check │
+│  test        │  │  unit/int    │  │  drift check    │  │  image build     │  │   (required)   │
+│  (Docker)    │  │  via xUnit   │  │  (both DbCtxs)  │  │  Services.Dock…  │  │                │
+└──────────────┘  └──────────────┘  └─────────────────┘  └──────────────────┘  └────────────────┘
+```
 
-Branch protection rulesets require CI to pass before merge.
+1. **Restore + build + test** — `dotnet restore`, `dotnet build`, `dotnet test`. Tests run against a Testcontainers Postgres on the GitHub runner (Docker is preinstalled on `ubuntu-latest`).
+2. **EF migration drift check** — `dotnet ef migrations has-pending-model-changes` for both `CampaignDbContext` and `GamesDbContext`. Migrations run at startup in production, so an undetected drift would crash the boot. Catching it in CI means a broken migration never reaches Dokploy.
+3. **Production Docker image build** — multi-stage build of `Services.Dockerfile`. Validates the published binary, asset paths, and runtime image without spinning up the container.
+
+A required status check (`build-and-test`) must pass before any PR can merge into `main` or `dev` — enforced by the repo's branch protection rulesets.
+
+### CD — Dokploy
+
+Push to a branch configured in Dokploy (typically `main`) triggers an auto-deploy via a GitHub App webhook. Dokploy pulls the image build steps from `Services.Dockerfile`, applies environment variables from its UI vault, and rolls out a new container behind the production reverse proxy.
+
+EF migrations apply at boot, **not** during the build. A bad migration surfaces as a startup failure on the new container; the previous container remains running until the new one passes its health check (`/api/health`).
+
+### Observability
+
+- **Seq** — Serilog ships structured logs to a Seq instance reachable on the `seq-net` Docker network. Local dev uses the one-liner above; production deploys point Serilog at the deployed Seq URL via the `Seq` configuration key.
+- **`/api/dev/log`** — a Dev-only bridge endpoint that the front-end's `devLogBridge` posts to so `console.*` from the browser shows up alongside server logs in Seq during local debugging. Disabled outside the Development environment.
 
 ---
 
