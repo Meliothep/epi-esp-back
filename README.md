@@ -2,6 +2,8 @@
 
 .NET 9 backend for **DnDiscord**, a D&D campaign manager built as a [Discord Activity](https://discord.com/developers/docs/activities/overview). It exposes a REST API and a SignalR hub that drive the companion front-end ([epi-esp-front](https://github.com/aCuriousDev/epi-esp-front), SolidJS). The project is a POC — substantial in scope, deliberately minimal in infrastructure overhead.
 
+🚀 **Live deployment:** [dndiscord.cadran.app](https://dndiscord.cadran.app/)
+
 ---
 
 ## Architecture overview
