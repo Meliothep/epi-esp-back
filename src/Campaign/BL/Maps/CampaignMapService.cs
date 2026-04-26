@@ -33,6 +33,10 @@ public class CampaignMapService : ICampaignMapService
 
     public async Task<CampaignMapDto> CreateAsync(Guid campaignId, Guid ownerId, CreateCampaignMapRequest request, CancellationToken ct = default)
     {
+        // Un Data vide ou whitespace est un JSON invalide pour Postgres jsonb → 500.
+        if (string.IsNullOrWhiteSpace(request.Data))
+            throw new ArgumentException("Map data must not be empty.", nameof(request));
+
         var now = DateTime.UtcNow;
         var map = new CampaignMap
         {
@@ -56,7 +60,13 @@ public class CampaignMapService : ICampaignMapService
         if (map is null) return null;
 
         if (!string.IsNullOrWhiteSpace(request.Name)) map.Name = request.Name.Trim();
-        if (request.Data is not null) map.Data = request.Data;
+        // Refuser Data="" ou Data="   " — Postgres jsonb rejette les strings vides avec 500.
+        if (request.Data is not null)
+        {
+            if (string.IsNullOrWhiteSpace(request.Data))
+                throw new ArgumentException("Map data must not be empty.", nameof(request));
+            map.Data = request.Data;
+        }
         if (request.IsPublic.HasValue) map.IsPublic = request.IsPublic.Value;
         map.UpdatedAt = DateTime.UtcNow;
 
