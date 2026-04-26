@@ -9,6 +9,7 @@ namespace DnDiscordAPI.Games.Character.DTOs
         public Guid Id { get; set; }
         public string Name { get; set; }
         public int Level { get; set; }
+        public int ExperiencePoints { get; set; }
         
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public CharacterClass Class { get; set; }
