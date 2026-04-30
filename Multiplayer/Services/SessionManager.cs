@@ -98,7 +98,12 @@ public class SessionManager
                 if (existingPlayer.Role == PlayerRole.DungeonMaster)
                     session.DmDisconnectedAt = null;
 
-                _connectionToSession.TryAdd(connectionId, resolvedSessionId);
+                // Forcer la mise à jour du mapping connexion→session.
+                // TryAdd échouerait si la connexion était déjà mappée à une ancienne
+                // session (ex. le MJ crée une 2e session sans avoir quitté la 1ère),
+                // laissant GetSessionByConnection pointer vers l'ancienne session InProgress
+                // → "Game already started" à la prochaine invocation de StartGame.
+                _connectionToSession[connectionId] = resolvedSessionId;
 
                 _logger.LogInformation("User {UserId} reconnected to session {SessionId}",
                     userId, resolvedSessionId);
@@ -126,7 +131,9 @@ public class SessionManager
             session.Players.Add(newPlayer);
             session.LastActivityAt = DateTime.UtcNow;
 
-            _connectionToSession.TryAdd(connectionId, resolvedSessionId);
+            // Idem : forcer la mise à jour pour éviter que l'ancienne session
+            // reste en tête du mapping si la connexion était déjà enregistrée.
+            _connectionToSession[connectionId] = resolvedSessionId;
 
             _logger.LogInformation("User {UserId} ({UserName}) joined session {SessionId}",
                 userId, userName, resolvedSessionId);
