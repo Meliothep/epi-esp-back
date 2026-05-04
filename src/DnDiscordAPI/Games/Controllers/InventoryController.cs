@@ -82,6 +82,35 @@ namespace DnDiscordAPI.Games.Controllers
         }
 
         /// <summary>
+        /// Le joueur achète un objet depuis le shop. Déduit le coût en GP du wallet
+        /// et ajoute l'objet à l'inventaire. Owner-only.
+        /// </summary>
+        [HttpPost("{characterId:guid}/buy")]
+        public async Task<ActionResult<BuyItemResult>> BuyItem(
+            Guid characterId,
+            [FromBody] BuyItemRequest request,
+            CancellationToken ct)
+        {
+            var ownerDiscordId = await _characterService.GetOwnerDiscordIdAsync(characterId);
+            if (ownerDiscordId == null || ownerDiscordId != _userContext.GetCurrentDiscordUserId())
+                return Forbid();
+
+            try
+            {
+                var result = await _inventoryService.BuyItemAsync(characterId, request);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Supprime une entrée d'inventaire. Accessible au propriétaire (jet) ou au
         /// MJ de la campagne via <c>?campaignId={id}</c>.
         /// </summary>

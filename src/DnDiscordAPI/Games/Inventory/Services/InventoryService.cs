@@ -21,6 +21,14 @@ namespace DnDiscordAPI.Games.Inventory.Services
         /// InventoryChanged event. Effect resolution (healing, light, …) is a POC stub.
         /// </summary>
         Task UseEntryAsync(Guid characterId, Guid entryId, Guid? campaignId = null);
+
+        /// <summary>
+        /// Player buys an item from the shop. Deducts GoldCost * quantity from wallet
+        /// and adds the item to inventory in a single transaction.
+        /// Throws <see cref="InvalidOperationException"/> when the item is not for sale
+        /// (GoldCost == 0) or the character doesn't have enough gold.
+        /// </summary>
+        Task<BuyItemResult> BuyItemAsync(Guid characterId, BuyItemRequest request);
     }
 
     public class InventoryService : IInventoryService
@@ -198,6 +206,81 @@ namespace DnDiscordAPI.Games.Inventory.Services
                 ItemId = item.Id,
                 ItemName = item.Name,
             });
+        }
+
+        public async Task<BuyItemResult> BuyItemAsync(Guid characterId, BuyItemRequest request)
+        {
+            var item = await _context.Items.FindAsync(request.ItemId)
+                ?? throw new KeyNotFoundException($"Item {request.ItemId} not found");
+
+            if (item.GoldCost <= 0)
+                throw new InvalidOperationException($"'{item.Name}' is not available for purchase.");
+
+            var totalCost = item.GoldCost * request.Quantity;
+
+            await using var tx = await _context.Database.BeginTransactionAsync();
+
+            var character = await _context.Characters.FindAsync(characterId)
+                ?? throw new KeyNotFoundException($"Character {characterId} not found");
+
+            character.Wallet ??= new DnDiscordAPI.Games.Character.Models.Wallet();
+
+            if (character.Wallet.GoldPieces < totalCost)
+                throw new InvalidOperationException($"Not enough gold. Required: {totalCost} GP, available: {character.Wallet.GoldPieces} GP.");
+
+            character.Wallet.GoldPieces -= totalCost;
+            character.UpdatedAt = DateTime.UtcNow;
+
+            var existing = await _context.InventoryEntries
+                .Include(e => e.Item)
+                .FirstOrDefaultAsync(e => e.CharacterId == characterId && e.ItemId == request.ItemId);
+
+            InventoryEntry entry;
+            InventoryChangeAction action;
+            if (existing != null)
+            {
+                existing.Quantity += request.Quantity;
+                entry = existing;
+                action = InventoryChangeAction.Updated;
+            }
+            else
+            {
+                entry = new InventoryEntry
+                {
+                    Id = Guid.NewGuid(),
+                    CharacterId = characterId,
+                    ItemId = request.ItemId,
+                    Quantity = request.Quantity,
+                    Item = item,
+                };
+                _context.InventoryEntries.Add(entry);
+                action = InventoryChangeAction.Added;
+            }
+
+            await _context.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            var sessionId = ResolveSessionId(request.CampaignId);
+            var dto = _mapper.Map<InventoryEntryDto>(entry);
+
+            await _signalR.SendInventoryChangedAsync(sessionId, new InventoryChangedEvent
+            {
+                CharacterId = characterId,
+                Action = action,
+                Entry = dto,
+            });
+
+            var walletDto = _mapper.Map<DnDiscordAPI.Games.Character.DTOs.WalletDto>(character.Wallet);
+            await _signalR.SendWalletChangedAsync(character.DiscordUserId, characterId, walletDto);
+
+            _logger.LogInformation("Character {Character} bought {Qty}x {Item} for {Cost} GP", characterId, request.Quantity, item.Name, totalCost);
+
+            return new BuyItemResult
+            {
+                Entry = dto,
+                RemainingGold = character.Wallet.GoldPieces,
+                TotalCost = totalCost,
+            };
         }
 
         /// <summary>
