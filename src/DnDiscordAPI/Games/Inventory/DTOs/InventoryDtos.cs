@@ -15,6 +15,9 @@ namespace DnDiscordAPI.Games.Inventory.DTOs
         public ItemCategory Category { get; set; }
 
         public string? ModelUrl { get; set; }
+
+        /// <summary>Prix en GP. 0 = non vendable.</summary>
+        public int GoldCost { get; set; }
     }
 
     public class InventoryEntryDto
@@ -39,5 +42,25 @@ namespace DnDiscordAPI.Games.Inventory.DTOs
         /// </summary>
         [Required]
         public Guid CampaignId { get; set; }
+    }
+
+    public class BuyItemRequest
+    {
+        [Required]
+        public Guid ItemId { get; set; }
+
+        [Range(1, 99)]
+        public int Quantity { get; set; } = 1;
+
+        /// <summary>Campaign context pour les broadcasts SignalR.</summary>
+        public Guid? CampaignId { get; set; }
+    }
+
+    public class BuyItemResult
+    {
+        public InventoryEntryDto Entry { get; set; } = new();
+        /// <summary>Wallet après déduction.</summary>
+        public int RemainingGold { get; set; }
+        public int TotalCost { get; set; }
     }
 }
