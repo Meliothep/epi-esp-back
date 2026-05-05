@@ -37,6 +37,17 @@ public static class GamesExtensions
     {
         using var scope = app.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
+        var autoMigrateEnabled = !string.Equals(
+            Environment.GetEnvironmentVariable("GAMESDB_AUTO_MIGRATE"),
+            "false",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (!autoMigrateEnabled)
+        {
+            app.Logger.LogWarning("Games database auto-migrations are disabled (GAMESDB_AUTO_MIGRATE=false).");
+            return app;
+        }
+
         try
         {
             app.Logger.LogInformation("Applying Games database migrations...");
@@ -50,7 +61,9 @@ public static class GamesExtensions
         catch (Exception ex)
         {
             app.Logger.LogError(ex, "An error occurred while applying Games database migrations.");
-            if (app.Environment.IsProduction()) throw;
+            // If migrations fail, the app will likely crash later with missing tables/columns anyway.
+            // Fail fast so deployment logs clearly show the root cause (permissions, wrong DB, locks, etc.).
+            throw;
         }
 
         return app;
