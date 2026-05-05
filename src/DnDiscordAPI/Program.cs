@@ -16,6 +16,8 @@ using DnDiscordAPI.Messages.Hubs;
 using DnDiscordAPI.Messages.Services;
 using DnDiscordAPI.PartyChat;
 using DnDiscordAPI;
+using DnDiscordAPI.Games.Database;
+using DnDiscord.Campaign.DataAccess;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -199,6 +201,13 @@ builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    await services.GetRequiredService<GamesDbContext>().Database.MigrateAsync();
+    await services.GetRequiredService<CampaignDbContext>().Database.MigrateAsync();
+}
 
 app.Use(async (context, next) =>
 {
