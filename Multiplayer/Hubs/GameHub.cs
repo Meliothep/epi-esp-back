@@ -16,6 +16,9 @@ namespace Multiplayer.Hubs;
 [Authorize]
 public class GameHub : Hub
 {
+    // Prevent PendingRolls leaks: auto-evict requests older than this.
+    private static readonly TimeSpan PendingRollTtl = TimeSpan.FromMinutes(5);
+
     private readonly ILogger<GameHub> _logger;
     private readonly SessionManager _sessionManager;
     private readonly MessageSequencer _messageSequencer;
@@ -302,6 +305,27 @@ public class GameHub : Hub
                         // so a grace-period reconnect doesn't see stale "canceled" entries for
                         // requests the server has already removed.
                         await Clients.OthersInGroup(sessionId).SendAsync("RollCanceled", disconnectCancelMessage);
+                    }
+                }
+            }
+            else if (session != null)
+            {
+                // If a player dropped, remove them from PendingUserIds on all requests.
+                // If a request ends up with no pending targets, close it to avoid leaks.
+                foreach (var kv in session.PendingRolls.ToArray())
+                {
+                    var req = kv.Value;
+                    // PendingUserIds is immutable outside PendingRollRequest, so we can't
+                    // surgically remove a single user; instead, evict stale requests via TTL.
+                    // (Players can rejoin and request replay if needed.)
+                    if (DateTime.UtcNow - req.CreatedAt >= PendingRollTtl)
+                    {
+                        if (session.PendingRolls.TryRemove(kv.Key, out var removed))
+                        {
+                            var ttlCancelPayload = new RollCanceledPayload(kv.Key, removed.Label, removed.PendingUserIds.ToList());
+                            var ttlCancelMessage = _messageSequencer.CreateMessage(sessionId, "RollCanceled", ttlCancelPayload);
+                            await Clients.OthersInGroup(sessionId).SendAsync("RollCanceled", ttlCancelMessage);
+                        }
                     }
                 }
             }
@@ -1116,6 +1140,21 @@ public class GameHub : Hub
     }
 
     private static string GetCampaignGroup(Guid campaignId) => $"campaign_{campaignId:N}";
+
+    /// <summary>
+    /// Broadcast that a campaign's persisted session (DB) was completed via HTTP.
+    /// Clients subscribed to the campaign group can react (e.g. exit the session UI).
+    /// </summary>
+    public async Task BroadcastCampaignSessionCompleted(Guid campaignId, Guid sessionId)
+    {
+        // Best-effort: this is an informational broadcast, not a state mutation.
+        await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("CampaignSessionCompleted", new
+        {
+            campaignId,
+            sessionId,
+            timestamp = DateTime.UtcNow,
+        });
+    }
     private static string GetActivityGroup(string guildId, string voiceChannelId)
         => $"activity_{guildId}_{voiceChannelId}";
 
@@ -1952,6 +1991,13 @@ public class GameHub : Hub
 
         if (session.PendingRolls.Count >= 10)
             throw new HubException("Too many open roll requests (max 10)");
+
+        // Best-effort TTL cleanup before adding a new request.
+        foreach (var kv in session.PendingRolls.ToArray())
+        {
+            if (DateTime.UtcNow - kv.Value.CreatedAt < PendingRollTtl) continue;
+            session.PendingRolls.TryRemove(kv.Key, out _);
+        }
 
         // Require a live ConnectionId alongside the Connected status so the
         // per-target SendAsync below can never silently drop a target that is

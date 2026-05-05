@@ -86,8 +86,34 @@ public class SessionManager
             return JoinResult.Fail("Session not found");
         }
 
-        lock (session.Players)
+        // Fast-path reject late joins racing with cleanup/removal.
+        // The removal path marks IsTerminated before dropping the session from _sessions.
+        if (session.IsTerminated)
+            return JoinResult.Fail("Session has ended");
+
+        if (_connectionToSession.TryGetValue(connectionId, out var oldSessionId) &&
+            oldSessionId != resolvedSessionId &&
+            _sessions.TryGetValue(oldSessionId, out var oldSession))
         {
+            lock (oldSession.PlayersLock)
+            {
+                var oldPlayer = oldSession.Players.FirstOrDefault(p => p.ConnectionId == connectionId);
+                if (oldPlayer != null)
+                {
+                    oldPlayer.ConnectionId = null;
+                    oldPlayer.Status = ConnectionStatus.Disconnected;
+                    oldPlayer.DisconnectedAt = DateTime.UtcNow;
+                    if (oldPlayer.Role == PlayerRole.DungeonMaster)
+                        oldSession.DmDisconnectedAt = DateTime.UtcNow;
+                }
+            }
+        }
+
+        lock (session.PlayersLock)
+        {
+            if (session.IsTerminated)
+                return JoinResult.Fail("Session has ended");
+
             // Vérifier si le joueur est déjà dans la session (reconnexion) 
             var existingPlayer = session.Players.FirstOrDefault(p => p.UserId == userId);
             if (existingPlayer != null)
@@ -159,7 +185,7 @@ public class SessionManager
             return false;
         }
 
-        lock (session.Players)
+        lock (session.PlayersLock)
         {
             var player = session.Players.FirstOrDefault(p => p.ConnectionId == connectionId);
             if (player != null)
@@ -196,7 +222,7 @@ public class SessionManager
         if (_connectionToSession.TryGetValue(connectionId, out var sessionId) &&
             _sessions.TryGetValue(sessionId, out var session))
         {
-            lock (session.Players)
+            lock (session.PlayersLock)
             {
                 var player = session.Players.FirstOrDefault(p => p.ConnectionId == connectionId);
                 if (player != null)
@@ -225,7 +251,7 @@ public class SessionManager
         if (!_sessions.TryGetValue(sessionId, out var session))
             return KickResult.Fail("Session not found");
 
-        lock (session.Players)
+        lock (session.PlayersLock)
         {
             var dm = session.Players.FirstOrDefault(p => p.Role == PlayerRole.DungeonMaster);
             if (dm == null || dm.UserId != kickerUserId)
@@ -313,7 +339,7 @@ public class SessionManager
     {
         foreach (var session in _sessions.Values)
         {
-            lock (session.Players)
+            lock (session.PlayersLock)
             {
                 if (session.Players.Any(p => p.UserId == userId))
                     return session;
@@ -333,16 +359,29 @@ public class SessionManager
     /// </summary>
     public bool RemoveSession(string sessionId)
     {
-        var removed = _sessions.TryRemove(sessionId, out var session);
-        if (!removed || session == null) return false;
+        if (!_sessions.TryGetValue(sessionId, out var session) || session == null)
+            return false;
+
+        List<string> connectionIds;
+        lock (session.PlayersLock)
+        {
+            session.IsTerminated = true;
+            connectionIds = session.Players
+                .Where(p => !string.IsNullOrEmpty(p.ConnectionId))
+                .Select(p => p.ConnectionId!)
+                .ToList();
+        }
+
+        var removed = _sessions.TryRemove(sessionId, out _);
+        if (!removed) return false;
 
         if (!string.IsNullOrWhiteSpace(session.JoinCode))
             _joinCodeToSession.TryRemove(session.JoinCode, out _);
 
         _messageSequencer.ResetSequence(sessionId);
 
-        foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
-            _connectionToSession.TryRemove(p.ConnectionId!, out _);
+        foreach (var cid in connectionIds)
+            _connectionToSession.TryRemove(cid, out _);
 
         return true;
     }
@@ -398,7 +437,7 @@ public class SessionManager
         if (!_sessions.TryGetValue(sessionId, out var session))
             return false;
 
-        lock (session.Players)
+        lock (session.PlayersLock)
         {
             var player = session.Players.FirstOrDefault(p => p.UserId == userId);
             if (player == null)
@@ -421,7 +460,7 @@ public class SessionManager
         if (!_sessions.TryGetValue(sessionId, out var session))
             return false;
 
-        lock (session.Players)
+        lock (session.PlayersLock)
         {
             var player = session.Players.FirstOrDefault(p => p.UserId == userId);
             if (player == null)
@@ -500,12 +539,21 @@ public class SessionManager
 
         foreach (var session in staleSessions)
         {
+            List<string> connectionIds;
+            lock (session.PlayersLock)
+            {
+                session.IsTerminated = true;
+                connectionIds = session.Players
+                    .Where(p => !string.IsNullOrEmpty(p.ConnectionId))
+                    .Select(p => p.ConnectionId!)
+                    .ToList();
+            }
             _sessions.TryRemove(session.SessionId, out _);
             if (!string.IsNullOrWhiteSpace(session.JoinCode))
                 _joinCodeToSession.TryRemove(session.JoinCode, out _);
             _messageSequencer.ResetSequence(session.SessionId);
-            foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
-                _connectionToSession.TryRemove(p.ConnectionId!, out _);
+            foreach (var cid in connectionIds)
+                _connectionToSession.TryRemove(cid, out _);
             _logger.LogInformation("Removed stale session {SessionId} (inactive since {LastActivity})",
                 session.SessionId, session.LastActivityAt);
         }
@@ -537,8 +585,7 @@ public class SessionManager
                 // ("Collection was modified") mid-iteration — which the background
                 // service catch would swallow, accumulating stale sessions forever.
                 List<SessionPlayer> players;
-                try { players = s.Players.ToList(); }
-                catch (InvalidOperationException) { return false; } // mutated, skip this tick
+                lock (s.PlayersLock) { players = s.Players.ToList(); }
 
                 return players.All(p => p.Status != Define.ConnectionStatus.Connected) &&
                        ((s.DmDisconnectedAt.HasValue && (now - s.DmDisconnectedAt.Value) >= dmDisconnectedThreshold) ||
@@ -548,12 +595,21 @@ public class SessionManager
 
         foreach (var session in toRemove)
         {
+            List<string> connectionIds;
+            lock (session.PlayersLock)
+            {
+                session.IsTerminated = true;
+                connectionIds = session.Players
+                    .Where(p => !string.IsNullOrEmpty(p.ConnectionId))
+                    .Select(p => p.ConnectionId!)
+                    .ToList();
+            }
             _sessions.TryRemove(session.SessionId, out _);
             if (!string.IsNullOrWhiteSpace(session.JoinCode))
                 _joinCodeToSession.TryRemove(session.JoinCode, out _);
             _messageSequencer.ResetSequence(session.SessionId);
-            foreach (var p in session.Players.Where(p => !string.IsNullOrEmpty(p.ConnectionId)))
-                _connectionToSession.TryRemove(p.ConnectionId!, out _);
+            foreach (var cid in connectionIds)
+                _connectionToSession.TryRemove(cid, out _);
             _logger.LogInformation(
                 "Removed session {SessionId} (DM disconnected: {DmDisconnected}, LastActivity: {LastActivity})",
                 session.SessionId, session.DmDisconnectedAt, session.LastActivityAt);
