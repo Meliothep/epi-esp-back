@@ -40,6 +40,18 @@ namespace Multiplayer.Models
         public string? MapId { get; set; }
 
         /// <summary>
+        /// Dernière configuration de carte de campagne diffusée via
+        /// <c>DmLaunchCampaignMap</c> (JSON brut du front : mapId, spawnPoint,
+        /// exitCells, trapCells, mapData…). Permet de rejouer
+        /// <c>CampaignMapLaunched</c> à un joueur qui rejoint/se reconnecte
+        /// pendant qu'une carte est en cours, au lieu de le laisser bloqué sur
+        /// l'écran "En attente du MJ" ou sur une grille vide.
+        /// Null tant qu'aucune carte n'a été lancée. Jamais sérialisé.
+        /// </summary>
+        [JsonIgnore]
+        public string? CampaignMapConfigJson { get; set; }
+
+        /// <summary>
         /// Server-authoritative combat state. Phase defaults to <see cref="CombatPhase.FreeRoam"/>;
         /// the <see cref="Services.CombatManager"/> is the only writer.
         /// </summary>
