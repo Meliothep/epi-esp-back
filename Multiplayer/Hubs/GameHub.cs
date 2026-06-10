@@ -28,8 +28,10 @@ public class GameHub : Hub
     private readonly ICharacterProgressionService _characterProgression;
     private readonly IInventoryGrantService _inventoryGrant;
     private readonly ICampaignMapLookupService _mapLookup;
+    private readonly ICampaignMemberLookupService _campaignMembers;
     private readonly CombatManager _combatManager;
     private readonly SpawnPlacementService _spawnPlacementService;
+    private readonly ConnectionRegistry _connectionRegistry;
     private readonly IServiceProvider _serviceProvider;
 
     /// <summary>
@@ -39,8 +41,10 @@ public class GameHub : Hub
         StateManager stateManager, IUserContextService userContextService,
         ICharacterLookupService characterLookup, ICharacterProgressionService characterProgression,
         IInventoryGrantService inventoryGrant,
-        ICampaignMapLookupService mapLookup, CombatManager combatManager,
+        ICampaignMapLookupService mapLookup, ICampaignMemberLookupService campaignMembers,
+        CombatManager combatManager,
         SpawnPlacementService spawnPlacementService,
+        ConnectionRegistry connectionRegistry,
         IServiceProvider serviceProvider)
     {
         _logger = logger;
@@ -52,8 +56,10 @@ public class GameHub : Hub
         _characterProgression = characterProgression;
         _inventoryGrant = inventoryGrant;
         _mapLookup = mapLookup;
+        _campaignMembers = campaignMembers;
         _combatManager = combatManager;
         _spawnPlacementService = spawnPlacementService;
+        _connectionRegistry = connectionRegistry;
         _serviceProvider = serviceProvider;
     }
 
@@ -65,6 +71,8 @@ public class GameHub : Hub
     {
         var userId = GetUserId();
         var userName = GetUserName();
+
+        _connectionRegistry.Register(userId, Context.ConnectionId);
 
         _logger.LogInformation(
             "User {UserId} ({UserName}) connected with ConnectionId {ConnectionId}",
@@ -138,6 +146,20 @@ public class GameHub : Hub
         // If the game hasn't started yet there's nothing else to replay.
         if (session.State != SessionState.InProgress) return;
 
+        await ReplayGameSnapshotToCallerAsync(session, userId);
+    }
+
+    /// <summary>
+    /// Replay the current game state (GameStarted, CombatStarted, and the
+    /// in-flight campaign map config if any) to the calling connection only.
+    /// Shared by the reconnect path (<see cref="SendRejoinSnapshotAsync"/>) and
+    /// the late-join path (<see cref="JoinSession"/> on an InProgress session) —
+    /// previously only reconnecting members got a snapshot, so a player joining
+    /// a running session via the "session en cours" banner stayed stuck in the
+    /// lobby or landed on an empty default grid.
+    /// </summary>
+    private async Task ReplayGameSnapshotToCallerAsync(GameSession session, Guid userId)
+    {
         // Replay GameStarted so the caller re-initialises the board with the
         // current map + unit roster. The existing GameStarted handler on the
         // front already routes through startGame() → initializeFreeRoam.
@@ -251,7 +273,22 @@ public class GameHub : Hub
             await Clients.Caller.SendAsync("CombatStarted", message);
         }
 
-        _logger.LogInformation("Rejoined user {UserId} to session {SessionId} (phase {Phase})",
+        // Une carte de campagne est en cours : rejouer son lancement au seul
+        // appelant pour qu'il soit redirigé vers le board avec la config
+        // complète (spawn/exits/traps + blob) au lieu de rester sur l'écran
+        // "En attente du MJ" alors que la carte a déjà été lancée.
+        if (session.CampaignId is Guid replayCampaignId
+            && !string.IsNullOrEmpty(session.CampaignMapConfigJson))
+        {
+            await Clients.Caller.SendAsync("CampaignMapLaunched", new
+            {
+                campaignId = replayCampaignId,
+                configJson = session.CampaignMapConfigJson,
+                launchedByUserId = session.DmUserId.ToString(),
+            });
+        }
+
+        _logger.LogInformation("Replayed game snapshot to user {UserId} for session {SessionId} (phase {Phase})",
             userId, session.SessionId, combatPhase);
     }
 
@@ -263,6 +300,7 @@ public class GameHub : Hub
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var userId = GetUserId();
+        _connectionRegistry.Unregister(userId, Context.ConnectionId);
         var sessionId = _sessionManager.GetSessionByConnection(Context.ConnectionId);
 
         _logger.LogInformation(
@@ -361,14 +399,20 @@ public class GameHub : Hub
 
         _logger.LogInformation("Session {SessionId} created by {UserId}", session.SessionId, userId);
 
-        await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("SessionStarted", new
+        var sessionStartedPayload = new
         {
             sessionId = session.SessionId,
             campaignId = campaignId,
             startedByUserId = userId,
             startedByUserName = userName,
             timestamp = DateTime.UtcNow
-        });
+        };
+
+        // Abonnés du groupe campagne (pages campagne ouvertes).
+        await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("SessionStarted", sessionStartedPayload);
+
+        // Invite ciblée à chaque membre connecté, où qu'il soit dans l'app.
+        await NotifyCampaignMembersAsync(campaignId, userId, sessionStartedPayload);
 
         if (!string.IsNullOrWhiteSpace(guildId) && !string.IsNullOrWhiteSpace(voiceChannelId))
         {
@@ -386,6 +430,35 @@ public class GameHub : Hub
         }
 
         return MapToSessionInfo(session);
+    }
+
+    /// <summary>
+    /// Envoie "SessionStarted" à chaque membre actif de la campagne connecté au hub,
+    /// sauf le MJ et les joueurs déjà dans une session en cours.
+    /// </summary>
+    private async Task NotifyCampaignMembersAsync(Guid campaignId, Guid dmUserId, object payload)
+    {
+        IReadOnlyList<Guid> memberIds;
+        try
+        {
+            memberIds = await _campaignMembers.GetActiveMemberUserIdsAsync(campaignId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Member lookup failed for campaign {CampaignId} — targeted invites skipped", campaignId);
+            return;
+        }
+
+        foreach (var memberId in memberIds)
+        {
+            if (memberId == dmUserId) continue;
+            if (_sessionManager.FindSessionByUser(memberId) != null) continue;
+
+            var connections = _connectionRegistry.GetConnections(memberId);
+            if (connections.Count == 0) continue;
+
+            await Clients.Clients(connections).SendAsync("SessionStarted", payload);
+        }
     }
 
     /// <summary>
@@ -423,6 +496,11 @@ public class GameHub : Hub
         if (session == null || session.DmUserId != userId || session.CampaignId != campaignId)
             throw new HubException("Only the Dungeon Master can perform this action.");
 
+        // La carte est terminée : ne plus rejouer CampaignMapLaunched aux
+        // joueurs qui se reconnectent — ils doivent revenir au fil du scénario.
+        session.CampaignMapConfigJson = null;
+        session.LastActivityAt = DateTime.UtcNow;
+
         await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("CampaignMapExited", new
         {
             campaignId,
@@ -448,6 +526,26 @@ public class GameHub : Hub
         var session = _sessionManager.FindSessionByUser(userId);
         if (session == null || session.DmUserId != userId || session.CampaignId != campaignId)
             throw new HubException("Only the Dungeon Master can perform this action.");
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(configJson);
+            if (doc.RootElement.TryGetProperty("mapId", out var mapIdProp)
+                && mapIdProp.GetString() is { Length: > 0 } launchedMapId)
+            {
+                _sessionManager.SetSessionMapId(session.SessionId, launchedMapId);
+            }
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            _logger.LogWarning(ex,
+                "DmLaunchCampaignMap: configJson could not be parsed for session {SessionId} — MapId not updated",
+                session.SessionId);
+        }
+
+        session.CampaignMapConfigJson = configJson;
+        session.State = SessionState.InProgress;
+        session.LastActivityAt = DateTime.UtcNow;
 
         await Clients.Group(GetCampaignGroup(campaignId)).SendAsync("CampaignMapLaunched", new
         {
@@ -531,6 +629,24 @@ public class GameHub : Hub
     }
 
     /// <summary>
+    /// Lecture seule : retourne la session live (in-memory) d'une campagne, ou
+    /// null s'il n'y en a aucune. Permet au front de valider la bannière
+    /// "session en cours" contre l'état réel du hub — la session DB (REST)
+    /// peut rester Active alors que la session SignalR a été terminée/nettoyée,
+    /// ce qui produisait des bannières fantômes menant à une map vide.
+    /// </summary>
+    public Task<SessionInfo?> GetActiveCampaignSession(Guid campaignId)
+    {
+        var session = _sessionManager
+            .GetSessionsByCampaign(campaignId)
+            .Where(s => s.State != SessionState.Ended && !s.IsTerminated)
+            .OrderByDescending(s => s.LastActivityAt)
+            .FirstOrDefault();
+
+        return Task.FromResult(session == null ? null : MapToSessionInfo(session));
+    }
+
+    /// <summary>
     /// Rejoindre la session active d'une campagne.
     /// Cherche dans les sessions in-memory par campaignId — évite le problème
     /// d'utiliser un UUID de base de données (listSessions REST) qui ne correspond
@@ -565,6 +681,25 @@ public class GameHub : Hub
         var userId = GetUserId();
         var userName = GetUserName();
 
+        // Les sessions de campagne sont réservées aux membres (MJ inclus).
+        var target = _sessionManager.ResolveSession(sessionId);
+        if (target?.CampaignId is Guid memberCheckCampaignId && target.DmUserId != userId)
+        {
+            bool isMember;
+            try
+            {
+                isMember = await _campaignMembers.IsMemberAsync(memberCheckCampaignId, userId);
+            }
+            catch (Exception ex)
+            {
+                // Lookup indisponible : on laisse passer plutôt que de bloquer le jeu.
+                _logger.LogWarning(ex, "Membership check failed for campaign {CampaignId}", memberCheckCampaignId);
+                isMember = true;
+            }
+            if (!isMember)
+                return JoinResult.Fail("Vous devez être membre de la campagne pour rejoindre cette session.");
+        }
+
         var result = _sessionManager.JoinSession(sessionId, userId, userName, Context.ConnectionId);
 
         if (result.Success && result.Session != null)
@@ -581,6 +716,26 @@ public class GameHub : Hub
                 userName,
                 timestamp = DateTime.UtcNow
             });
+
+            // Late-join d'une partie déjà lancée : rejouer l'état courant au
+            // nouvel arrivant (GameStarted + CombatStarted + carte de campagne
+            // en cours). Avant, seul le chemin reconnexion (OnConnectedAsync /
+            // RejoinSession) recevait ce snapshot — un joueur qui rejoignait
+            // via la bannière "session en cours" restait bloqué dans le lobby
+            // ou arrivait sur une grille vide.
+            if (result.Session.State == SessionState.InProgress)
+            {
+                try
+                {
+                    await ReplayGameSnapshotToCallerAsync(result.Session, userId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Failed to replay game snapshot to late joiner {UserId} in session {SessionId}",
+                        userId, resolvedSessionId);
+                }
+            }
 
             _logger.LogInformation("User {UserId} joined session {SessionId} (requested: {Requested})",
                 userId, resolvedSessionId, sessionId);

@@ -17,6 +17,7 @@ public static class MultiplayerServiceExtensions
         services.AddSingleton<MessageSequencer>();
         services.AddSingleton<SpawnPlacementService>();
         services.AddSingleton<StateManager>();
+        services.AddSingleton<ConnectionRegistry>();
 
         // Route Clients.User(...) through the Discord JWT sub claim so wallet broadcasts
         // can be addressed to a specific player connection.

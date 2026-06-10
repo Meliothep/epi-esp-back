@@ -299,6 +299,19 @@ public class SessionManager
     }
 
     /// <summary>
+    /// Résout une session par son ID interne ou son joinCode, sans la modifier.
+    /// </summary>
+    public GameSession? ResolveSession(string sessionIdOrJoinCode)
+    {
+        if (_sessions.TryGetValue(sessionIdOrJoinCode, out var direct))
+            return direct;
+        if (_joinCodeToSession.TryGetValue(sessionIdOrJoinCode, out var mapped) &&
+            _sessions.TryGetValue(mapped, out var byCode))
+            return byCode;
+        return null;
+    }
+
+    /// <summary>
     /// Récupérer l'ID de session associé à une connexion
     /// </summary>
     /// <param name="connectionId"></param>

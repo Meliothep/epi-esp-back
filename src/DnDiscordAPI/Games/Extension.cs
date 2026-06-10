@@ -29,6 +29,7 @@ public static class GamesExtensions
         builder.Services.AddScoped<IInventoryService, InventoryService>();
         builder.Services.AddScoped<IInventoryGrantService, InventoryGrantAdapter>();
         builder.Services.AddScoped<Multiplayer.Services.ICampaignMapLookupService, DnDiscordAPI.Campaign.CampaignMapLookupAdapter>();
+        builder.Services.AddScoped<Multiplayer.Services.ICampaignMemberLookupService, DnDiscordAPI.Campaign.CampaignMemberLookupAdapter>();
 
         return builder;
     }

@@ -52,6 +52,20 @@ public class CampaignSessionService : ICampaignSessionService
         if (!await IsCampaignMemberAsync(campaignId, userId, ct))
             throw new InvalidOperationException("You don't have permission to create sessions for this campaign.");
 
+        var existing = await _db.GameSessions
+            .Include(s => s.Entries.OrderBy(e => e.VisitedAt))
+            .Where(s => s.CampaignId == campaignId && s.Status == GameSessionStatus.Active)
+            .OrderByDescending(s => s.StartedAt)
+            .FirstOrDefaultAsync(ct);
+
+        if (existing != null)
+        {
+            _logger.LogInformation(
+                "CreateSession({CampaignId}) by user {UserId}: reusing existing active session {SessionId}",
+                campaignId, userId, existing.Id);
+            return MapToResponse(existing);
+        }
+
         var session = new CampaignGameSession
         {
             Id = Guid.NewGuid(),
