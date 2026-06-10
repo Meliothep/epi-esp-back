@@ -72,13 +72,21 @@ public class CampaignDbContext : DbContext
 
             entity.Property(m => m.Name).IsRequired().HasMaxLength(200);
             entity.Property(m => m.Data).IsRequired().HasColumnType("jsonb");
+            entity.Property(m => m.OwnerId).IsRequired();
+            entity.Property(m => m.IsPublic).IsRequired().HasDefaultValue(false);
 
+            // CampaignId is now optional — standalone maps have CampaignId = null.
+            // Restrict (not Cascade) so deleting a campaign does not silently wipe
+            // standalone maps that happen to share an owner.
             entity.HasOne<Models.Campaign>()
                 .WithMany()
                 .HasForeignKey(m => m.CampaignId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(m => m.CampaignId);
+            entity.HasIndex(m => m.OwnerId);
+            entity.HasIndex(m => m.IsPublic);
             entity.HasIndex(m => new { m.CampaignId, m.CreatedAt });
         });
     }

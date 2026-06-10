@@ -115,6 +115,7 @@ namespace DnDiscordAPI.Games.Database
                 Description = "Une fiole emplie d'un liquide rouge vif qui semble bouillonner doucement, même au repos.",
                 Icon = "potion-red",
                 Category = ItemCategory.Consumable,
+                GoldCost = 50,
             },
             new Item
             {
@@ -123,6 +124,7 @@ namespace DnDiscordAPI.Games.Database
                 Description = "Un flacon au liquide bleu nuit parcouru d'éclats scintillants, comme un ciel étoilé en miniature.",
                 Icon = "potion-blue",
                 Category = ItemCategory.Consumable,
+                GoldCost = 50,
             },
             new Item
             {
@@ -131,6 +133,7 @@ namespace DnDiscordAPI.Games.Database
                 Description = "Un bâton de bois enduit de résine à son extrémité, prêt à être allumé pour éclairer les ténèbres.",
                 Icon = "torch",
                 Category = ItemCategory.Tool,
+                GoldCost = 1,
             },
             new Item
             {
@@ -139,6 +142,7 @@ namespace DnDiscordAPI.Games.Database
                 Description = "Un paquet soigneusement emballé contenant du pain dur, de la viande séchée et un morceau de fromage.",
                 Icon = "bread",
                 Category = ItemCategory.Consumable,
+                GoldCost = 5,
             },
             new Item
             {
@@ -147,6 +151,7 @@ namespace DnDiscordAPI.Games.Database
                 Description = "Une longue corde en chanvre tressé, solide et fiable, indispensable pour tout aventurier.",
                 Icon = "rope",
                 Category = ItemCategory.Tool,
+                GoldCost = 1,
             },
             new Item
             {
@@ -155,6 +160,7 @@ namespace DnDiscordAPI.Games.Database
                 Description = "Une lame courte et effilée, parfaite pour les coups rapides ou un lancer précis.",
                 Icon = "dagger",
                 Category = ItemCategory.Weapon,
+                GoldCost = 25,
             },
             new Item
             {
@@ -163,6 +169,7 @@ namespace DnDiscordAPI.Games.Database
                 Description = "Un arc léger en bois d'if, idéal pour la chasse et les escarmouches à distance.",
                 Icon = "bow",
                 Category = ItemCategory.Weapon,
+                GoldCost = 50,
             },
             new Item
             {
@@ -171,6 +178,7 @@ namespace DnDiscordAPI.Games.Database
                 Description = "Un bouclier rond en acier forgé, marqué par les coups de batailles passées.",
                 Icon = "shield",
                 Category = ItemCategory.Armor,
+                GoldCost = 75,
             },
             new Item
             {
@@ -179,6 +187,7 @@ namespace DnDiscordAPI.Games.Database
                 Description = "Un vieux parchemin couvert de runes argentées qui luisent faiblement dans l'obscurité.",
                 Icon = "scroll",
                 Category = ItemCategory.Magic,
+                GoldCost = 150,
             },
             new Item
             {
@@ -187,6 +196,7 @@ namespace DnDiscordAPI.Games.Database
                 Description = "Un petit coffre en bois cerclé de fer, fermé par un cadenas rouillé. On entend quelque chose tinter à l'intérieur.",
                 Icon = "chest",
                 Category = ItemCategory.Treasure,
+                GoldCost = 0,
             },
             new Item
             {
@@ -195,6 +205,7 @@ namespace DnDiscordAPI.Games.Database
                 Description = "Un pendentif en bronze patiné, orné d'un œil gravé qui semble suivre du regard quiconque le porte.",
                 Icon = "amulet",
                 Category = ItemCategory.Magic,
+                GoldCost = 200,
             },
             new Item
             {
@@ -203,6 +214,7 @@ namespace DnDiscordAPI.Games.Database
                 Description = "Un parchemin jauni et usé, marqué d'un grand X rouge. L'encre semble ancienne mais la carte reste lisible.",
                 Icon = "map",
                 Category = ItemCategory.Treasure,
+                GoldCost = 0,
             },
         };
     }

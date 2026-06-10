@@ -24,7 +24,8 @@ public interface ICampaignService
     // Invite codes
     Task<InviteCodeResponse?> GenerateInviteCodeAsync(Guid campaignId, GenerateInviteCodeRequest request, Guid userId, CancellationToken ct = default);
     Task<CampaignDetailResponse?> JoinCampaignAsync(JoinCampaignRequest request, Guid userId, CancellationToken ct = default);
-    
+    Task<CampaignDetailResponse?> JoinPublicCampaignAsync(Guid campaignId, Guid userId, CancellationToken ct = default);
+
     // Members
     Task<CampaignMemberListResponse> GetMembersAsync(Guid campaignId, Guid userId, CancellationToken ct = default);
     Task<CampaignMemberResponse?> AddMemberAsync(Guid campaignId, AddMemberRequest request, Guid userId, CancellationToken ct = default);
@@ -140,6 +141,7 @@ public class CampaignService : ICampaignService
         {
             CampaignRoleFilter.AsDungeonMaster => query.Where(c => c.DungeonMasterId == userId),
             CampaignRoleFilter.AsPlayer => query.Where(c => c.Members.Any(m => m.UserId == userId && m.Status == MembershipStatus.Active)),
+            CampaignRoleFilter.AsMember => query.Where(c => c.DungeonMasterId == userId || c.Members.Any(m => m.UserId == userId && m.Status == MembershipStatus.Active)),
             _ => query.Where(c => c.IsPublic || c.DungeonMasterId == userId || c.Members.Any(m => m.UserId == userId && m.Status == MembershipStatus.Active))
         };
         
@@ -387,7 +389,71 @@ public class CampaignService : ICampaignService
         await _dbContext.SaveChangesAsync(ct);
         
         _logger.LogInformation("User {UserId} joined campaign {CampaignId} via invite code", userId, campaign.Id);
-        
+
+        return MapToDetailResponse(campaign, userId);
+    }
+
+    /// <inheritdoc />
+    public async Task<CampaignDetailResponse?> JoinPublicCampaignAsync(
+        Guid campaignId,
+        Guid userId,
+        CancellationToken ct = default)
+    {
+        var campaign = await _dbContext.Campaigns
+            .Include(c => c.Members)
+            .FirstOrDefaultAsync(c => c.Id == campaignId, ct);
+
+        if (campaign == null)
+            return null;
+
+        if (!campaign.IsPublic)
+            throw new CampaignException("Cette campagne n'est pas publique.");
+
+        if (campaign.DungeonMasterId == userId)
+            throw new CampaignException("Vous êtes le Maître du Jeu de cette campagne.");
+
+        // Check for any existing record regardless of status to avoid unique-constraint
+        // violations when the user was previously a member (soft-deleted / inactive).
+        var existingMember = campaign.Members.FirstOrDefault(m => m.UserId == userId);
+        if (existingMember != null)
+        {
+            if (existingMember.Status == MembershipStatus.Active)
+                throw new CampaignException("Vous êtes déjà membre de cette campagne.");
+
+            // Reactivate the former member instead of inserting a duplicate row.
+            existingMember.Status     = MembershipStatus.Active;
+            existingMember.JoinedAt   = DateTime.UtcNow;
+            existingMember.AcceptedAt = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(ct);
+            _logger.LogInformation("User {UserId} re-joined public campaign {CampaignId}", userId, campaign.Id);
+            return MapToDetailResponse(campaign, userId);
+        }
+
+        var activeMembers = campaign.Members.Count(m => m.Status == MembershipStatus.Active);
+        if (activeMembers >= campaign.MaxPlayers)
+            throw new CampaignException("La campagne est complète.");
+
+        var displayName = _userContext.GetCurrentUserName();
+        if (string.IsNullOrWhiteSpace(displayName))
+            displayName = $"Aventurier #{userId.ToString("N")[..6]}";
+
+        var member = new CampaignMember
+        {
+            Id        = Guid.NewGuid(),
+            CampaignId = campaign.Id,
+            UserId    = userId,
+            Role      = CampaignMemberRole.Player,
+            Status    = MembershipStatus.Active,
+            JoinedAt  = DateTime.UtcNow,
+            AcceptedAt = DateTime.UtcNow,
+            Nickname  = displayName,
+        };
+
+        _dbContext.CampaignMembers.Add(member);
+        await _dbContext.SaveChangesAsync(ct);
+
+        _logger.LogInformation("User {UserId} joined public campaign {CampaignId}", userId, campaign.Id);
+
         return MapToDetailResponse(campaign, userId);
     }
 

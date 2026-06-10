@@ -16,6 +16,10 @@ using DnDiscordAPI.Messages.Hubs;
 using DnDiscordAPI.Messages.Services;
 using DnDiscordAPI.PartyChat;
 using DnDiscordAPI;
+using DnDiscordAPI.Games.Database;
+using DnDiscord.Campaign.DataAccess;
+using DnDiscord.Campaign.Services;
+using DnDiscordAPI.Campaign;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,6 +32,11 @@ builder.Services.AddMultiplayerServices();
 builder.AddAuthServices();
 builder.AddGamesModule();
 builder.AddCampaignModule();
+
+// Campaign realtime events are emitted through the GameHub, which only exists
+// in the API host project. Controllers/services inside the Campaign module
+// consume the abstraction.
+builder.Services.AddSingleton<ICampaignRealtimeNotifier, CampaignRealtimeNotifier>();
 
 // Rate limiting global léger pour le POC ; policies fines pour les
 // endpoints destructifs / coûteux RGPD (DELETE /me et GET /me/export).
@@ -199,6 +208,13 @@ builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    await services.GetRequiredService<GamesDbContext>().Database.MigrateAsync();
+    await services.GetRequiredService<CampaignDbContext>().Database.MigrateAsync();
+}
 
 app.Use(async (context, next) =>
 {

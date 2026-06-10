@@ -160,11 +160,19 @@ namespace DnDiscordAPI.Games.Character.Services
 
         public async Task<CharacterDto> LevelUpAsync(GamesDbContext ctx, Guid characterId)
         {
+            const int MaxLevel = 20;
+            const int MaxRetries = 1;
+
+            for (var attempt = 0; attempt <= MaxRetries; attempt++)
+            {
             var character = await ctx.Characters.FindAsync(characterId);
             if (character == null)
                 throw new KeyNotFoundException($"Character {characterId} not found");
 
             var previousLevel = character.Level;
+
+            if (character.Level >= MaxLevel)
+                throw new InvalidOperationException($"Character {characterId} is already at the maximum level ({MaxLevel}).");
 
             // Augmenter le niveau
             character.Level++;
@@ -192,7 +200,16 @@ namespace DnDiscordAPI.Games.Character.Services
 
             character.UpdatedAt = DateTime.UtcNow;
 
-            await ctx.SaveChangesAsync();
+            try
+            {
+                await ctx.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < MaxRetries)
+            {
+                _logger.LogWarning("Concurrency conflict during level-up for character {CharacterId}, retrying (attempt {Attempt})", characterId, attempt + 1);
+                ctx.ChangeTracker.Clear();
+                continue;
+            }
 
             _logger.LogInformation(
                 "Character {Name} (ID: {Id}) leveled up to level {Level}. HP: {Current}/{Max}",
@@ -218,6 +235,10 @@ namespace DnDiscordAPI.Games.Character.Services
                 character.Abilities.Charisma);
 
             return _mapper.Map<CharacterDto>(character);
+            } // end for loop
+
+            // Unreachable — loop always returns or rethrows, but satisfies the compiler.
+            throw new DbUpdateConcurrencyException($"Level-up for character {characterId} failed after retries.");
         }
 
         private static int ClampAbility(int value) => Math.Clamp(value, 1, 20);
@@ -303,35 +324,51 @@ namespace DnDiscordAPI.Games.Character.Services
 
         public async Task<WalletDto> ModifyWalletAsync(Guid characterId, ModifyWalletRequest request)
         {
-            var character = await _context.Characters.FindAsync(characterId)
-                ?? throw new KeyNotFoundException($"Character {characterId} not found");
+            const int MaxRetries = 1;
+            for (var attempt = 0; attempt <= MaxRetries; attempt++)
+            {
+                var character = await _context.Characters.FindAsync(characterId)
+                    ?? throw new KeyNotFoundException($"Character {characterId} not found");
 
-            character.Wallet ??= new Wallet();
+                character.Wallet ??= new Wallet();
 
-            // Appliquer les deltas et clamper à 0
-            character.Wallet.CopperPieces = Math.Max(0, character.Wallet.CopperPieces + request.CopperPieces);
-            character.Wallet.SilverPieces = Math.Max(0, character.Wallet.SilverPieces + request.SilverPieces);
-            character.Wallet.ElectrumPieces = Math.Max(0, character.Wallet.ElectrumPieces + request.ElectrumPieces);
-            character.Wallet.GoldPieces = Math.Max(0, character.Wallet.GoldPieces + request.GoldPieces);
-            character.Wallet.PlatinumPieces = Math.Max(0, character.Wallet.PlatinumPieces + request.PlatinumPieces);
-            character.UpdatedAt = DateTime.UtcNow;
+                // Appliquer les deltas et clamper à 0
+                character.Wallet.CopperPieces = Math.Max(0, character.Wallet.CopperPieces + request.CopperPieces);
+                character.Wallet.SilverPieces = Math.Max(0, character.Wallet.SilverPieces + request.SilverPieces);
+                character.Wallet.ElectrumPieces = Math.Max(0, character.Wallet.ElectrumPieces + request.ElectrumPieces);
+                character.Wallet.GoldPieces = Math.Max(0, character.Wallet.GoldPieces + request.GoldPieces);
+                character.Wallet.PlatinumPieces = Math.Max(0, character.Wallet.PlatinumPieces + request.PlatinumPieces);
+                character.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+                try
+                {
+                    await _context.SaveChangesAsync();
+                }
+                catch (DbUpdateConcurrencyException) when (attempt < MaxRetries)
+                {
+                    _logger.LogWarning("Concurrency conflict modifying wallet for character {CharacterId}, retrying (attempt {Attempt})", characterId, attempt + 1);
+                    _context.ChangeTracker.Clear();
+                    continue;
+                }
 
-            var dto = _mapper.Map<WalletDto>(character.Wallet);
+                var dto = _mapper.Map<WalletDto>(character.Wallet);
 
-            await _signalR.SendWalletChangedAsync(character.DiscordUserId, characterId, dto);
+                await _signalR.SendWalletChangedAsync(character.DiscordUserId, characterId, dto);
 
-            _logger.LogInformation(
-                "Wallet modified for character {Character}: CP={CP} PA={PA} PE={PE} PO={PO} PP={PP}",
-                characterId,
-                character.Wallet.CopperPieces,
-                character.Wallet.SilverPieces,
-                character.Wallet.ElectrumPieces,
-                character.Wallet.GoldPieces,
-                character.Wallet.PlatinumPieces);
+                _logger.LogInformation(
+                    "Wallet modified for character {Character}: CP={CP} PA={PA} PE={PE} PO={PO} PP={PP}",
+                    characterId,
+                    character.Wallet.CopperPieces,
+                    character.Wallet.SilverPieces,
+                    character.Wallet.ElectrumPieces,
+                    character.Wallet.GoldPieces,
+                    character.Wallet.PlatinumPieces);
 
-            return dto;
+                return dto;
+            }
+
+            // Unreachable — loop always returns or rethrows, but satisfies the compiler.
+            throw new DbUpdateConcurrencyException($"Wallet update for character {characterId} failed after retries.");
         }
     }
 }

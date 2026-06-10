@@ -122,6 +122,9 @@ namespace DnDiscordAPI.Games.Database.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<int>("GoldCost")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Icon")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -146,6 +149,7 @@ namespace DnDiscordAPI.Games.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-000000000001"),
                             Category = 0,
                             Description = "Une fiole emplie d'un liquide rouge vif qui semble bouillonner doucement, même au repos.",
+                            GoldCost = 50,
                             Icon = "potion-red",
                             Name = "Potion de soin"
                         },
@@ -154,6 +158,7 @@ namespace DnDiscordAPI.Games.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-000000000002"),
                             Category = 0,
                             Description = "Un flacon au liquide bleu nuit parcouru d'éclats scintillants, comme un ciel étoilé en miniature.",
+                            GoldCost = 50,
                             Icon = "potion-blue",
                             Name = "Potion de mana"
                         },
@@ -162,6 +167,7 @@ namespace DnDiscordAPI.Games.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-000000000003"),
                             Category = 3,
                             Description = "Un bâton de bois enduit de résine à son extrémité, prêt à être allumé pour éclairer les ténèbres.",
+                            GoldCost = 1,
                             Icon = "torch",
                             Name = "Torche"
                         },
@@ -170,6 +176,7 @@ namespace DnDiscordAPI.Games.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-000000000004"),
                             Category = 0,
                             Description = "Un paquet soigneusement emballé contenant du pain dur, de la viande séchée et un morceau de fromage.",
+                            GoldCost = 5,
                             Icon = "bread",
                             Name = "Ration de voyage"
                         },
@@ -178,6 +185,7 @@ namespace DnDiscordAPI.Games.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-000000000005"),
                             Category = 3,
                             Description = "Une longue corde en chanvre tressé, solide et fiable, indispensable pour tout aventurier.",
+                            GoldCost = 1,
                             Icon = "rope",
                             Name = "Corde en chanvre"
                         },
@@ -186,6 +194,7 @@ namespace DnDiscordAPI.Games.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-000000000006"),
                             Category = 1,
                             Description = "Une lame courte et effilée, parfaite pour les coups rapides ou un lancer précis.",
+                            GoldCost = 25,
                             Icon = "dagger",
                             Name = "Dague affûtée"
                         },
@@ -194,6 +203,7 @@ namespace DnDiscordAPI.Games.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-000000000007"),
                             Category = 1,
                             Description = "Un arc léger en bois d'if, idéal pour la chasse et les escarmouches à distance.",
+                            GoldCost = 50,
                             Icon = "bow",
                             Name = "Arc court"
                         },
@@ -202,6 +212,7 @@ namespace DnDiscordAPI.Games.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-000000000008"),
                             Category = 2,
                             Description = "Un bouclier rond en acier forgé, marqué par les coups de batailles passées.",
+                            GoldCost = 75,
                             Icon = "shield",
                             Name = "Bouclier en acier"
                         },
@@ -210,6 +221,7 @@ namespace DnDiscordAPI.Games.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-000000000009"),
                             Category = 4,
                             Description = "Un vieux parchemin couvert de runes argentées qui luisent faiblement dans l'obscurité.",
+                            GoldCost = 150,
                             Icon = "scroll",
                             Name = "Parchemin de sort"
                         },
@@ -218,6 +230,7 @@ namespace DnDiscordAPI.Games.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-00000000000a"),
                             Category = 5,
                             Description = "Un petit coffre en bois cerclé de fer, fermé par un cadenas rouillé. On entend quelque chose tinter à l'intérieur.",
+                            GoldCost = 0,
                             Icon = "chest",
                             Name = "Coffre au trésor"
                         },
@@ -226,6 +239,7 @@ namespace DnDiscordAPI.Games.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-00000000000b"),
                             Category = 4,
                             Description = "Un pendentif en bronze patiné, orné d'un œil gravé qui semble suivre du regard quiconque le porte.",
+                            GoldCost = 200,
                             Icon = "amulet",
                             Name = "Amulette ancienne"
                         },
@@ -234,6 +248,7 @@ namespace DnDiscordAPI.Games.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-00000000000c"),
                             Category = 5,
                             Description = "Un parchemin jauni et usé, marqué d'un grand X rouge. L'encre semble ancienne mais la carte reste lisible.",
+                            GoldCost = 0,
                             Icon = "map",
                             Name = "Carte au trésor"
                         });

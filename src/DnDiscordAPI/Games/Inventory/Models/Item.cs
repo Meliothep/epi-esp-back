@@ -36,5 +36,10 @@ namespace DnDiscordAPI.Games.Inventory.Models
         /// URL d'un modèle 3D poly.pizza (optionnel, pour affichage 3D futur).
         /// </summary>
         public string? ModelUrl { get; set; }
+
+        /// <summary>
+        /// Prix en pièces d'or (GP). 0 = non vendable en boutique.
+        /// </summary>
+        public int GoldCost { get; set; }
     }
 }

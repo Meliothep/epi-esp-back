@@ -17,15 +17,18 @@ public class CampaignSessionController : ControllerBase
     private readonly ICampaignSessionService _sessionService;
     private readonly IUserContextService _userContextService;
     private readonly ILogger<CampaignSessionController> _logger;
+    private readonly ICampaignRealtimeNotifier _realtime;
 
     public CampaignSessionController(
         ICampaignSessionService sessionService,
         IUserContextService userContextService,
-        ILogger<CampaignSessionController> logger)
+        ILogger<CampaignSessionController> logger,
+        ICampaignRealtimeNotifier realtime)
     {
         _sessionService = sessionService;
         _userContextService = userContextService;
         _logger = logger;
+        _realtime = realtime;
     }
 
     /// <summary>Create a new game session for a campaign.</summary>
@@ -101,6 +104,21 @@ public class CampaignSessionController : ControllerBase
     {
         var userId = _userContextService.GetCurrentUserId();
         var session = await _sessionService.CompleteSessionAsync(sessionId, userId, ct);
-        return session is null ? NotFound() : Ok(session);
+        if (session is null) return NotFound();
+
+        // Notify live clients subscribed to this campaign (session page + lobby)
+        // so they can exit without requiring a manual refresh.
+        try
+        {
+            await _realtime.NotifySessionCompletedAsync(campaignId, sessionId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to broadcast CampaignSessionCompleted for campaign {CampaignId} session {SessionId}",
+                campaignId, sessionId);
+        }
+
+        return Ok(session);
     }
 }
